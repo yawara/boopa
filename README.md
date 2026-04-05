@@ -1,5 +1,11 @@
 # boopa
 
+## WARNING
+
+**EARLY STAGE SOFTWARE: DO NOT USE THIS IN PRODUCTION.**
+
+This project is still in an early stage. Expect breaking changes, missing hardening, incomplete operational safeguards, and behavior that may change without notice.
+
 ![boopa](./boopa.png)
 
 `boopa` is a single-service network boot controller for a trusted office LAN. It serves boot assets over HTTP and TFTP, persists the currently selected distro, and exposes a small dashboard/API so a DHCP administrator can switch the active distro and read the DHCP values they must configure manually.
