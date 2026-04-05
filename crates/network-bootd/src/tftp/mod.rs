@@ -1,6 +1,6 @@
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 
-use tokio::{fs, net::UdpSocket, time::timeout};
+use tokio::{net::UdpSocket, time::timeout};
 
 use crate::app_state::AppState;
 
@@ -10,7 +10,8 @@ const MAX_BLOCK_SIZE: usize = 65464;
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct TftpResolution {
     pub requested_path: String,
-    pub cache_relative_path: String,
+    pub served_path: String,
+    pub generated: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,11 +34,19 @@ pub async fn serve(state: Arc<AppState>) -> anyhow::Result<()> {
         let (bytes_read, peer) = socket.recv_from(&mut buffer).await?;
         if let Some(request) = parse_rrq(&buffer[..bytes_read]) {
             tracing::info!(%peer, requested_path = %request.filename, ?request.options, "tftp rrq");
-            if let Some(local_path) = state.resolve_boot_path(&request.filename).await {
+            if let Some(asset) = state.resolve_boot_asset(&request.filename).await {
                 // Keep DATA packets on the RRQ port so GRUB can complete transfers
                 // when booting through an explicitly configured non-default TFTP port.
-                if let Err(error) = send_file(&socket, peer, local_path, &request).await {
-                    tracing::warn!(?error, %peer, "tftp transfer failed");
+                match asset.read_bytes().await {
+                    Ok(bytes) => {
+                        if let Err(error) = send_file(&socket, peer, bytes, &request).await {
+                            tracing::warn!(?error, %peer, "tftp transfer failed");
+                        }
+                    }
+                    Err(error) => {
+                        tracing::warn!(?error, %peer, "tftp asset read failed");
+                        send_error(&socket, peer, 1, "file not found").await?;
+                    }
                 }
             } else {
                 tracing::warn!(%peer, requested_path = %request.filename, "tftp file not found");
@@ -53,15 +62,12 @@ pub async fn run_tftp_server(state: Arc<AppState>) -> anyhow::Result<()> {
 
 pub async fn resolve_request(state: Arc<AppState>, requested_path: &str) -> Option<TftpResolution> {
     state
-        .resolve_boot_path(requested_path)
+        .resolve_boot_asset(requested_path)
         .await
-        .map(|path| TftpResolution {
+        .map(|asset| TftpResolution {
             requested_path: requested_path.to_string(),
-            cache_relative_path: path
-                .strip_prefix(state.config().cache_dir())
-                .ok()
-                .map(|relative| relative.display().to_string())
-                .unwrap_or_else(|| path.display().to_string()),
+            served_path: asset.logical_path().to_string(),
+            generated: asset.is_generated(),
         })
 }
 
@@ -72,10 +78,9 @@ pub fn resolve_path(root: &std::path::Path, relative_path: &str) -> PathBuf {
 async fn send_file(
     socket: &UdpSocket,
     peer: SocketAddr,
-    path: PathBuf,
+    bytes: Vec<u8>,
     request: &ReadRequest,
 ) -> anyhow::Result<()> {
-    let bytes = fs::read(path).await?;
     let block_size = request
         .options
         .block_size
@@ -295,7 +300,7 @@ mod tests {
                 super::send_file(
                     server.as_ref(),
                     client_addr,
-                    path,
+                    tokio::fs::read(path).await.expect("read file"),
                     &super::ReadRequest {
                         filename: "ubuntu/bios/kernel".to_string(),
                         options: super::RequestOptions::default(),
@@ -352,7 +357,7 @@ mod tests {
                 super::send_file(
                     server.as_ref(),
                     client_addr,
-                    path,
+                    tokio::fs::read(path).await.expect("read file"),
                     &super::ReadRequest {
                         filename: "/ubuntu/uefi/kernel".to_string(),
                         options: super::RequestOptions {

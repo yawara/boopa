@@ -4,6 +4,7 @@ use anyhow::Result;
 use boot_recipe::{BootMode, DhcpGuidance, DistroId, all_distros, get_recipe};
 use image_cache::{CacheEntry, ImageCache};
 
+use crate::boot_assets::ResolvedBootAsset;
 use crate::config::Config;
 use crate::persistence::{PersistedSelection, load_selection, save_selection};
 
@@ -93,11 +94,12 @@ impl AppState {
         })
     }
 
-    pub async fn resolve_boot_path(&self, requested_path: &str) -> Option<std::path::PathBuf> {
+    pub async fn resolve_boot_asset(&self, requested_path: &str) -> Option<ResolvedBootAsset> {
         crate::boot_assets::resolve_asset(
             &self.config.cache_dir(),
             self.selected_distro().await,
             requested_path,
+            self.config.tftp_advertise_addr,
         )
     }
 }

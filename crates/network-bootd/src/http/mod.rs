@@ -50,13 +50,13 @@ async fn get_boot_asset(
     State(state): State<Arc<AppState>>,
     Path(path): Path<String>,
 ) -> impl IntoResponse {
-    match state.resolve_boot_path(&path).await {
-        Some(local_path) => match tokio::fs::read(local_path).await {
+    match state.resolve_boot_asset(&path).await {
+        Some(asset) => match asset.read_bytes().await {
             Ok(bytes) => {
                 let mut response = axum::response::Response::new(Body::from(bytes));
                 response.headers_mut().insert(
                     header::CONTENT_TYPE,
-                    HeaderValue::from_static("application/octet-stream"),
+                    HeaderValue::from_static(asset.content_type()),
                 );
                 response.into_response()
             }

@@ -1,25 +1,35 @@
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::PathBuf;
 
 #[derive(Clone, Debug)]
 pub struct Config {
     pub api_bind: SocketAddr,
     pub tftp_bind: SocketAddr,
+    pub tftp_advertise_addr: SocketAddr,
     pub data_dir: PathBuf,
     pub frontend_dir: PathBuf,
 }
 
 impl Config {
     pub fn from_env() -> Self {
+        let tftp_bind = env_var("BOOPA_TFTP_BIND", "NETWORK_BOOTD_TFTP_BIND")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or_else(|| SocketAddr::from(([0, 0, 0, 0], 6969)));
+
         Self {
             api_bind: env_var("BOOPA_API_BIND", "NETWORK_BOOTD_API_BIND")
                 .ok()
                 .and_then(|value| value.parse().ok())
                 .unwrap_or_else(|| SocketAddr::from(([127, 0, 0, 1], 8080))),
-            tftp_bind: env_var("BOOPA_TFTP_BIND", "NETWORK_BOOTD_TFTP_BIND")
-                .ok()
-                .and_then(|value| value.parse().ok())
-                .unwrap_or_else(|| SocketAddr::from(([0, 0, 0, 0], 6969))),
+            tftp_bind,
+            tftp_advertise_addr: env_var(
+                "BOOPA_TFTP_ADVERTISE_ADDR",
+                "NETWORK_BOOTD_TFTP_ADVERTISE_ADDR",
+            )
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or_else(|| default_tftp_advertise_addr(tftp_bind)),
             data_dir: data_dir_from_env(),
             frontend_dir: env_var("BOOPA_FRONTEND_DIR", "NETWORK_BOOTD_FRONTEND_DIR")
                 .map(PathBuf::from)
@@ -38,6 +48,18 @@ impl Config {
 
 fn env_var(primary: &str, legacy: &str) -> Result<String, std::env::VarError> {
     std::env::var(primary).or_else(|_| std::env::var(legacy))
+}
+
+fn default_tftp_advertise_addr(bind: SocketAddr) -> SocketAddr {
+    match bind.ip() {
+        IpAddr::V4(ip) if ip.is_unspecified() => {
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), bind.port())
+        }
+        IpAddr::V6(ip) if ip.is_unspecified() => {
+            SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), bind.port())
+        }
+        _ => bind,
+    }
 }
 
 fn data_dir_from_env() -> PathBuf {
@@ -71,15 +93,17 @@ mod tests {
 
     static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
-    const BOOPA_ENV_VARS: [&str; 4] = [
+    const BOOPA_ENV_VARS: [&str; 5] = [
         "BOOPA_API_BIND",
         "BOOPA_TFTP_BIND",
+        "BOOPA_TFTP_ADVERTISE_ADDR",
         "BOOPA_DATA_DIR",
         "BOOPA_FRONTEND_DIR",
     ];
-    const LEGACY_ENV_VARS: [&str; 4] = [
+    const LEGACY_ENV_VARS: [&str; 5] = [
         "NETWORK_BOOTD_API_BIND",
         "NETWORK_BOOTD_TFTP_BIND",
+        "NETWORK_BOOTD_TFTP_ADVERTISE_ADDR",
         "NETWORK_BOOTD_DATA_DIR",
         "NETWORK_BOOTD_FRONTEND_DIR",
     ];
@@ -135,6 +159,8 @@ mod tests {
             ("NETWORK_BOOTD_API_BIND", "127.0.0.1:28080"),
             ("BOOPA_TFTP_BIND", "127.0.0.1:16969"),
             ("NETWORK_BOOTD_TFTP_BIND", "127.0.0.1:26969"),
+            ("BOOPA_TFTP_ADVERTISE_ADDR", "10.0.2.2:16969"),
+            ("NETWORK_BOOTD_TFTP_ADVERTISE_ADDR", "10.0.2.9:26969"),
             ("BOOPA_DATA_DIR", "/tmp/boopa-data"),
             ("NETWORK_BOOTD_DATA_DIR", "/tmp/network-bootd-data"),
             ("BOOPA_FRONTEND_DIR", "/tmp/boopa-frontend"),
@@ -144,6 +170,10 @@ mod tests {
         let config = Config::from_env();
         assert_eq!(config.api_bind, SocketAddr::from(([127, 0, 0, 1], 18080)));
         assert_eq!(config.tftp_bind, SocketAddr::from(([127, 0, 0, 1], 16969)));
+        assert_eq!(
+            config.tftp_advertise_addr,
+            SocketAddr::from(([10, 0, 2, 2], 16969))
+        );
         assert_eq!(config.data_dir, PathBuf::from("/tmp/boopa-data"));
         assert_eq!(config.frontend_dir, PathBuf::from("/tmp/boopa-frontend"));
 
@@ -158,6 +188,7 @@ mod tests {
         set_env_vars(&[
             ("NETWORK_BOOTD_API_BIND", "127.0.0.1:28080"),
             ("NETWORK_BOOTD_TFTP_BIND", "127.0.0.1:26969"),
+            ("NETWORK_BOOTD_TFTP_ADVERTISE_ADDR", "10.0.2.9:26969"),
             ("NETWORK_BOOTD_DATA_DIR", "/tmp/network-bootd-data"),
             ("NETWORK_BOOTD_FRONTEND_DIR", "/tmp/network-bootd-frontend"),
         ]);
@@ -165,6 +196,10 @@ mod tests {
         let config = Config::from_env();
         assert_eq!(config.api_bind, SocketAddr::from(([127, 0, 0, 1], 28080)));
         assert_eq!(config.tftp_bind, SocketAddr::from(([127, 0, 0, 1], 26969)));
+        assert_eq!(
+            config.tftp_advertise_addr,
+            SocketAddr::from(([10, 0, 2, 9], 26969))
+        );
         assert_eq!(config.data_dir, PathBuf::from("/tmp/network-bootd-data"));
         assert_eq!(
             config.frontend_dir,
@@ -199,6 +234,22 @@ mod tests {
 
         let config = Config::from_env();
         assert_eq!(config.data_dir, PathBuf::from("var/network-bootd"));
+
+        clear_env();
+    }
+
+    #[test]
+    fn wildcard_tftp_bind_defaults_advertise_addr_to_loopback() {
+        let _lock = env_lock();
+        clear_env();
+        set_env_vars(&[("BOOPA_TFTP_BIND", "0.0.0.0:16969")]);
+
+        let config = Config::from_env();
+        assert_eq!(config.tftp_bind, SocketAddr::from(([0, 0, 0, 0], 16969)));
+        assert_eq!(
+            config.tftp_advertise_addr,
+            SocketAddr::from(([127, 0, 0, 1], 16969))
+        );
 
         clear_env();
     }

@@ -1,5 +1,8 @@
 use std::{
+    future::Future,
     path::PathBuf,
+    pin::Pin,
+    sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -28,16 +31,43 @@ pub enum CacheStatus {
     Refreshed,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ImageCache {
     root: PathBuf,
+    downloader: Arc<dyn AssetDownloader>,
+}
+
+pub type DownloadFuture = Pin<Box<dyn Future<Output = Result<Vec<u8>, CacheError>> + Send>>;
+
+pub trait AssetDownloader: Send + Sync {
+    fn download(&self, url: &str) -> DownloadFuture;
+}
+
+#[derive(Debug, Clone, Default)]
+struct ReqwestDownloader;
+
+impl AssetDownloader for ReqwestDownloader {
+    fn download(&self, url: &str) -> DownloadFuture {
+        let url = url.to_owned();
+        Box::pin(async move {
+            let response = reqwest::get(url).await?.error_for_status()?;
+            Ok(response.bytes().await?.to_vec())
+        })
+    }
 }
 
 impl ImageCache {
     pub async fn new(root: impl Into<PathBuf>) -> Result<Self, CacheError> {
+        Self::with_downloader(root, Arc::new(ReqwestDownloader)).await
+    }
+
+    pub async fn with_downloader(
+        root: impl Into<PathBuf>,
+        downloader: Arc<dyn AssetDownloader>,
+    ) -> Result<Self, CacheError> {
         let root = root.into();
         tokio::fs::create_dir_all(&root).await?;
-        Ok(Self { root })
+        Ok(Self { root, downloader })
     }
 
     pub async fn refresh_distro(&self, distro: DistroId) -> Result<Vec<CacheEntry>, CacheError> {
@@ -51,9 +81,8 @@ impl ImageCache {
                     tokio::fs::create_dir_all(parent).await?;
                 }
 
-                // Keep local verification deterministic without depending on live upstream
-                // availability. The payload preserves the intended source URL for inspection.
-                tokio::fs::write(&path, asset.source_url.as_bytes()).await?;
+                let payload = self.downloader.download(&asset.source_url).await?;
+                tokio::fs::write(&path, payload).await?;
 
                 entries.push(CacheEntry {
                     distro_id: distro,
@@ -123,4 +152,6 @@ pub enum CacheError {
     Io(#[from] std::io::Error),
     #[error(transparent)]
     Recipe(#[from] boot_recipe::RecipeError),
+    #[error(transparent)]
+    Download(#[from] reqwest::Error),
 }

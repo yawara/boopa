@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use boopa::{app_state::AppState, config::Config, tftp::resolve_request};
+use boot_recipe::DistroId;
 
 #[tokio::test]
 async fn resolves_tftp_request_for_cached_asset() {
@@ -17,6 +18,7 @@ async fn resolves_tftp_request_for_cached_asset() {
         AppState::new(Config {
             api_bind: ([127, 0, 0, 1], 0).into(),
             tftp_bind: ([127, 0, 0, 1], 0).into(),
+            tftp_advertise_addr: ([127, 0, 0, 1], 6969).into(),
             data_dir: tempdir.path().join("data"),
             frontend_dir: tempdir.path().join("frontend"),
         })
@@ -26,4 +28,48 @@ async fn resolves_tftp_request_for_cached_asset() {
 
     let resolution = resolve_request(state, "ubuntu/bios/kernel").await;
     assert!(resolution.is_some());
+}
+
+#[tokio::test]
+async fn resolves_tftp_request_for_generated_grub_alias() {
+    let tempdir = tempfile::tempdir().expect("tempdir");
+    let state = Arc::new(
+        AppState::new(Config {
+            api_bind: ([127, 0, 0, 1], 0).into(),
+            tftp_bind: ([127, 0, 0, 1], 0).into(),
+            tftp_advertise_addr: ([10, 0, 2, 2], 16969).into(),
+            data_dir: tempdir.path().join("data"),
+            frontend_dir: tempdir.path().join("frontend"),
+        })
+        .await
+        .expect("state"),
+    );
+
+    let resolution = resolve_request(state, "grub/grub.cfg")
+        .await
+        .expect("resolution");
+    assert_eq!(resolution.served_path, "ubuntu/uefi/grub.cfg");
+    assert!(resolution.generated);
+}
+
+#[tokio::test]
+async fn generated_tftp_grub_aliases_follow_selected_distro() {
+    let tempdir = tempfile::tempdir().expect("tempdir");
+    let state = Arc::new(
+        AppState::new(Config {
+            api_bind: ([127, 0, 0, 1], 0).into(),
+            tftp_bind: ([127, 0, 0, 1], 0).into(),
+            tftp_advertise_addr: ([10, 0, 2, 2], 16969).into(),
+            data_dir: tempdir.path().join("data"),
+            frontend_dir: tempdir.path().join("frontend"),
+        })
+        .await
+        .expect("state"),
+    );
+    state
+        .set_selected_distro(DistroId::Fedora)
+        .await
+        .expect("set distro");
+
+    assert!(resolve_request(state, "grub/grub.cfg").await.is_none());
 }

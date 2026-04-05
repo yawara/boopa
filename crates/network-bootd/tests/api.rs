@@ -15,6 +15,7 @@ fn test_config() -> (tempfile::TempDir, Config) {
     let config = Config {
         api_bind: ([127, 0, 0, 1], 0).into(),
         tftp_bind: ([127, 0, 0, 1], 0).into(),
+        tftp_advertise_addr: ([127, 0, 0, 1], 6969).into(),
         data_dir: temp_dir.path().join("data"),
         frontend_dir: temp_dir.path().join("frontend"),
     };

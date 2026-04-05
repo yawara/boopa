@@ -15,6 +15,14 @@ assert_contains() {
   fi
 }
 
+assert_missing() {
+  local file_path="$1"
+  if [[ -e "${file_path}" ]]; then
+    echo "expected ${file_path} to be absent" >&2
+    exit 1
+  fi
+}
+
 unsupported_log="${TMP_DIR}/unsupported.log"
 if "${REPO_ROOT}/scripts/smoke/common.sh" fedora uefi >"${unsupported_log}" 2>&1; then
   echo "expected unsupported target to fail" >&2
@@ -22,27 +30,83 @@ if "${REPO_ROOT}/scripts/smoke/common.sh" fedora uefi >"${unsupported_log}" 2>&1
 fi
 assert_contains "only ubuntu uefi is implemented right now" "${unsupported_log}"
 
+SOURCE_DATA_DIR="${TMP_DIR}/source-data"
+SOURCE_CACHE_DIR="${SOURCE_DATA_DIR}/cache/ubuntu/uefi"
+mkdir -p "${SOURCE_CACHE_DIR}"
+printf 'shim-bytes\n' >"${SOURCE_CACHE_DIR}/grubx64.efi"
+printf 'kernel-bytes\n' >"${SOURCE_CACHE_DIR}/kernel"
+printf 'initrd-bytes\n' >"${SOURCE_CACHE_DIR}/initrd"
+
 SMOKE_DRY_RUN=1 \
 SMOKE_WORK_ROOT="${TMP_DIR}/work" \
 SMOKE_TIMESTAMP="20260405T170000Z" \
 SMOKE_API_PORT=18080 \
 SMOKE_TFTP_PORT=16969 \
+SMOKE_SOURCE_DATA_DIR="${SOURCE_DATA_DIR}" \
 "${REPO_ROOT}/scripts/smoke/common.sh" ubuntu uefi >"${TMP_DIR}/dry-run.log"
 
-GRUB_CFG="${TMP_DIR}/work/ubuntu-uefi-20260405T170000Z/boot-root/grub/grub.cfg"
 QEMU_CMD_LOG="${TMP_DIR}/work/ubuntu-uefi-20260405T170000Z/logs/qemu-command.txt"
 BOOTX64="${TMP_DIR}/work/ubuntu-uefi-20260405T170000Z/boot-root/EFI/BOOT/BOOTX64.EFI"
 STARTUP_NSH="${TMP_DIR}/work/ubuntu-uefi-20260405T170000Z/boot-root/startup.nsh"
+GRUB_CFG="${TMP_DIR}/work/ubuntu-uefi-20260405T170000Z/boot-root/grub/grub.cfg"
+GRUB_CFG_ALIAS="${TMP_DIR}/work/ubuntu-uefi-20260405T170000Z/boot-root/boot/grub/grub.cfg"
+GRUB_CFG_ALIAS_NESTED="${TMP_DIR}/work/ubuntu-uefi-20260405T170000Z/boot-root/ubuntu/uefi/grub/grub.cfg"
+KERNEL_PATH="${TMP_DIR}/work/ubuntu-uefi-20260405T170000Z/boot-root/ubuntu/uefi/kernel"
+INITRD_PATH="${TMP_DIR}/work/ubuntu-uefi-20260405T170000Z/boot-root/ubuntu/uefi/initrd"
 
-[[ -f "${GRUB_CFG}" ]] || { echo "expected grub config at ${GRUB_CFG}" >&2; exit 1; }
 [[ -f "${QEMU_CMD_LOG}" ]] || { echo "expected qemu command log at ${QEMU_CMD_LOG}" >&2; exit 1; }
 [[ -f "${BOOTX64}" ]] || { echo "expected bootloader at ${BOOTX64}" >&2; exit 1; }
 [[ -f "${STARTUP_NSH}" ]] || { echo "expected startup.nsh at ${STARTUP_NSH}" >&2; exit 1; }
+[[ ! -e "${GRUB_CFG}" ]] || { echo "did not expect locally staged grub config at ${GRUB_CFG}" >&2; exit 1; }
+[[ ! -e "${KERNEL_PATH}" ]] || { echo "did not expect locally staged kernel at ${KERNEL_PATH}" >&2; exit 1; }
+[[ ! -e "${INITRD_PATH}" ]] || { echo "did not expect locally staged initrd at ${INITRD_PATH}" >&2; exit 1; }
 
-assert_contains "Booting Ubuntu UEFI installer through boopa TFTP" "${GRUB_CFG}"
-assert_contains "root=(tftp,10.0.2.2:16969)" "${GRUB_CFG}"
-assert_contains "/ubuntu/uefi/kernel" "${GRUB_CFG}"
 assert_contains "file=fat:rw:${TMP_DIR}/work/ubuntu-uefi-20260405T170000Z/boot-root" "${QEMU_CMD_LOG}"
 assert_contains "BOOTX64.EFI" "${STARTUP_NSH}"
+assert_contains "file=fat:rw:${TMP_DIR}/work/ubuntu-uefi-20260405T170000Z/boot-root" "${QEMU_CMD_LOG}"
+
+assert_missing "${GRUB_CFG}"
+assert_missing "${GRUB_CFG_ALIAS}"
+assert_missing "${GRUB_CFG_ALIAS_NESTED}"
+assert_missing "${KERNEL_PATH}"
+assert_missing "${INITRD_PATH}"
+
+SYNC_RUN_DIR="${TMP_DIR}/sync/ubuntu-uefi-20260405T170500Z"
+SYNC_BOOT_ROOT="${SYNC_RUN_DIR}/boot-root"
+SYNC_GRUB_CFG="${SYNC_BOOT_ROOT}/grub/grub.cfg"
+SYNC_GRUB_CFG_ALIAS="${SYNC_BOOT_ROOT}/boot/grub/grub.cfg"
+SYNC_UBUNTU_GRUB_CFG="${SYNC_BOOT_ROOT}/ubuntu/uefi/grub.cfg"
+SYNC_GRUB_CFG_ALIAS_NESTED="${SYNC_BOOT_ROOT}/ubuntu/uefi/grub/grub.cfg"
+
+(
+  set -euo pipefail
+  # shellcheck source=scripts/smoke/lib.sh
+  source "${REPO_ROOT}/scripts/smoke/lib.sh"
+
+  smoke_fetch_backend_asset() {
+    local asset_path="$1"
+    local destination_path="$2"
+    mkdir -p "$(dirname "${destination_path}")"
+    printf '%s\n' "${asset_path}" >"${destination_path}"
+  }
+
+  SMOKE_RUN_DIR="${SYNC_RUN_DIR}"
+  SMOKE_SERVICE_DATA_DIR="${SYNC_RUN_DIR}/service-data"
+  SMOKE_TFTP_ROOT="${SYNC_BOOT_ROOT}"
+  SMOKE_LOG_DIR="${SYNC_RUN_DIR}/logs"
+
+  smoke_prepare_workspace
+  smoke_sync_boot_root_from_backend
+)
+
+[[ -f "${SYNC_GRUB_CFG}" ]] || { echo "expected staged grub config at ${SYNC_GRUB_CFG}" >&2; exit 1; }
+[[ -f "${SYNC_GRUB_CFG_ALIAS}" ]] || { echo "expected staged grub config at ${SYNC_GRUB_CFG_ALIAS}" >&2; exit 1; }
+[[ -f "${SYNC_UBUNTU_GRUB_CFG}" ]] || { echo "expected staged grub config at ${SYNC_UBUNTU_GRUB_CFG}" >&2; exit 1; }
+[[ -f "${SYNC_GRUB_CFG_ALIAS_NESTED}" ]] || { echo "expected staged grub config at ${SYNC_GRUB_CFG_ALIAS_NESTED}" >&2; exit 1; }
+
+assert_contains "ubuntu/uefi/grub.cfg" "${SYNC_GRUB_CFG}"
+assert_contains "ubuntu/uefi/grub.cfg" "${SYNC_GRUB_CFG_ALIAS}"
+assert_contains "ubuntu/uefi/grub.cfg" "${SYNC_UBUNTU_GRUB_CFG}"
+assert_contains "ubuntu/uefi/grub.cfg" "${SYNC_GRUB_CFG_ALIAS_NESTED}"
 
 echo "smoke harness dry-run regression checks passed"
