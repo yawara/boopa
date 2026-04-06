@@ -52,6 +52,36 @@ export interface SelectionResponse {
   selected: DistroId;
 }
 
+export type UbuntuStorageLayout = "direct" | "lvm";
+
+export interface UbuntuAutoinstallConfig {
+  hostname: string;
+  username: string;
+  locale: string;
+  keyboardLayout: string;
+  timezone: string;
+  storageLayout: UbuntuStorageLayout;
+  installOpenSsh: boolean;
+  allowPasswordAuth: boolean;
+  authorizedKeys: string[];
+  packages: string[];
+}
+
+export interface UbuntuAutoinstallConfigUpdate extends UbuntuAutoinstallConfig {
+  password?: string;
+}
+
+export interface UbuntuAutoinstallResponse {
+  config: UbuntuAutoinstallConfig;
+  renderedYaml: string;
+  hasPassword: boolean;
+}
+
+export interface ValidationErrorResponse {
+  message: string;
+  fieldErrors: Record<string, string>;
+}
+
 const apiBaseUrl =
   typeof globalThis.location?.origin === "string"
     ? new URL("/api/", globalThis.location.origin).toString()
@@ -60,7 +90,7 @@ const apiBaseUrl =
 export const networkBootApi = createApi({
   reducerPath: "networkBootApi",
   baseQuery: fetchBaseQuery({ baseUrl: apiBaseUrl }),
-  tagTypes: ["Distros", "Dhcp", "Cache"],
+  tagTypes: ["Distros", "Dhcp", "Cache", "Autoinstall"],
   endpoints: (builder) => ({
     getDistros: builder.query<DistrosResponse, void>({
       query: () => "distros",
@@ -73,6 +103,10 @@ export const networkBootApi = createApi({
     getCache: builder.query<CacheResponse, void>({
       query: () => "cache",
       providesTags: ["Cache"],
+    }),
+    getUbuntuAutoinstall: builder.query<UbuntuAutoinstallResponse, void>({
+      query: () => "autoinstall/ubuntu",
+      providesTags: ["Autoinstall"],
     }),
     setSelection: builder.mutation<SelectionResponse, DistroId>({
       query: (distro) => ({
@@ -90,6 +124,17 @@ export const networkBootApi = createApi({
       }),
       invalidatesTags: ["Cache"],
     }),
+    setUbuntuAutoinstall: builder.mutation<
+      UbuntuAutoinstallResponse,
+      UbuntuAutoinstallConfigUpdate
+    >({
+      query: (body) => ({
+        url: "autoinstall/ubuntu",
+        method: "PUT",
+        body,
+      }),
+      invalidatesTags: ["Autoinstall"],
+    }),
   }),
 });
 
@@ -97,6 +142,8 @@ export const {
   useGetCacheQuery,
   useGetDhcpQuery,
   useGetDistrosQuery,
+  useGetUbuntuAutoinstallQuery,
   useRefreshCacheMutation,
   useSetSelectionMutation,
+  useSetUbuntuAutoinstallMutation,
 } = networkBootApi;

@@ -57,28 +57,6 @@ async fn resolves_tftp_request_for_generated_grub_alias() {
     assert!(resolution.generated);
 }
 
-#[tokio::test]
-async fn generated_tftp_grub_aliases_follow_selected_distro() {
-    let tempdir = tempfile::tempdir().expect("tempdir");
-    let state = Arc::new(
-        AppState::new(Config {
-            api_bind: ([127, 0, 0, 1], 0).into(),
-            tftp_bind: ([127, 0, 0, 1], 0).into(),
-            tftp_advertise_addr: ([10, 0, 2, 2], 16969).into(),
-            data_dir: tempdir.path().join("data"),
-            frontend_dir: tempdir.path().join("frontend"),
-        })
-        .await
-        .expect("state"),
-    );
-    state
-        .set_selected_distro(DistroId::Fedora)
-        .await
-        .expect("set distro");
-
-    assert!(resolve_request(state, "grub/grub.cfg").await.is_none());
-}
-
 #[actix_web::test]
 async fn generated_grub_config_contains_ubuntu_iso_url() {
     let tempdir = tempfile::tempdir().expect("tempdir");
@@ -108,4 +86,37 @@ async fn generated_grub_config_contains_ubuntu_iso_url() {
     let payload = String::from_utf8(body.to_vec()).expect("utf8");
     assert!(payload.contains("boot=casper"));
     assert!(payload.contains("iso-url=http://10.0.2.2:18080/boot/ubuntu/uefi/live-server.iso"));
+    assert!(payload.contains("autoinstall"));
+    assert!(
+        payload.contains("ds=nocloud-net;s=http://10.0.2.2:18080/boot/ubuntu/uefi/autoinstall/")
+    );
+}
+
+#[tokio::test]
+async fn generated_tftp_grub_aliases_follow_selected_fedora_distro() {
+    let tempdir = tempfile::tempdir().expect("tempdir");
+    let state = Arc::new(
+        AppState::new(Config {
+            api_bind: ([127, 0, 0, 1], 18080).into(),
+            tftp_bind: ([127, 0, 0, 1], 0).into(),
+            tftp_advertise_addr: ([10, 0, 2, 2], 16969).into(),
+            data_dir: tempdir.path().join("data"),
+            frontend_dir: tempdir.path().join("frontend"),
+        })
+        .await
+        .expect("state"),
+    );
+    state
+        .set_selected_distro(DistroId::Fedora)
+        .await
+        .expect("set distro");
+
+    let resolution = resolve_request(state.clone(), "grub/grub.cfg")
+        .await
+        .expect("resolution");
+    assert_eq!(resolution.served_path, "fedora/uefi/grub.cfg");
+    assert!(resolution.generated);
+
+    let kickstart = resolve_request(state, "fedora/uefi/kickstart/ks.cfg").await;
+    assert!(kickstart.is_none());
 }

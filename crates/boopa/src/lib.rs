@@ -1,4 +1,5 @@
 pub mod app_state;
+pub mod autoinstall;
 pub mod boot_assets;
 pub mod config;
 pub mod http;

@@ -35,6 +35,14 @@ pub fn configure(cfg: &mut ServiceConfig, state: Arc<AppState>) {
         .route("/api/dhcp", web::get().to(routes::dhcp::get_dhcp))
         .route("/api/cache", web::get().to(routes::cache::get_cache_status))
         .route(
+            "/api/autoinstall/ubuntu",
+            web::get().to(routes::autoinstall::get_ubuntu_autoinstall),
+        )
+        .route(
+            "/api/autoinstall/ubuntu",
+            web::put().to(routes::autoinstall::put_ubuntu_autoinstall),
+        )
+        .route(
             "/api/selection",
             web::put().to(routes::distros::put_selection),
         )

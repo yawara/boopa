@@ -110,13 +110,19 @@ impl Handler for BoopaTftpHandler {
 mod tests {
     use std::{
         net::{IpAddr, Ipv4Addr, SocketAddr},
-        sync::Arc,
+        sync::{Arc, OnceLock},
         time::Duration,
     };
 
-    use tokio::{fs, net::UdpSocket, task::JoinHandle, time::timeout};
+    use tokio::{fs, net::UdpSocket, sync::Mutex, task::JoinHandle, time::timeout};
 
     use crate::{app_state::AppState, config::Config};
+
+    static TFTP_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+    async fn test_lock() -> tokio::sync::MutexGuard<'static, ()> {
+        TFTP_TEST_LOCK.get_or_init(|| Mutex::new(())).lock().await
+    }
 
     fn rrq_packet(path: &str) -> Vec<u8> {
         let mut packet = Vec::new();
@@ -229,6 +235,7 @@ mod tests {
 
     #[tokio::test]
     async fn serves_cached_asset_over_tftp() {
+        let _lock = test_lock().await;
         let tempdir = tempfile::tempdir().expect("tempdir");
         seed_asset(&tempdir, "ubuntu/bios/kernel", b"kernel-bytes").await;
         let (_state, addr, handle) = spawn_test_server(&tempdir, None).await;
@@ -243,6 +250,7 @@ mod tests {
 
     #[tokio::test]
     async fn serves_generated_grub_config_over_tftp() {
+        let _lock = test_lock().await;
         let tempdir = tempfile::tempdir().expect("tempdir");
         let (_state, addr, handle) = spawn_test_server(&tempdir, None).await;
 
@@ -258,6 +266,7 @@ mod tests {
 
     #[tokio::test]
     async fn returns_file_not_found_for_missing_asset() {
+        let _lock = test_lock().await;
         let tempdir = tempfile::tempdir().expect("tempdir");
         let (_state, addr, handle) = spawn_test_server(&tempdir, None).await;
 
@@ -270,16 +279,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn suppresses_ubuntu_only_generated_assets_for_non_ubuntu_selection() {
+    async fn serves_fedora_generated_grub_for_fedora_selection() {
+        let _lock = test_lock().await;
         let tempdir = tempfile::tempdir().expect("tempdir");
         let (_state, addr, handle) =
             spawn_test_server(&tempdir, Some(boot_recipe::DistroId::Fedora)).await;
 
-        let error = fetch_tftp(addr, "grub/grub.cfg")
+        let payload = fetch_tftp(addr, "grub/grub.cfg")
             .await
-            .expect_err("expected tftp error");
+            .expect("expected grub payload");
         handle.abort();
 
-        assert_eq!(error, 1);
+        let payload = String::from_utf8(payload).expect("utf8");
+        assert!(payload.contains("linuxefi /fedora/uefi/kernel"));
+        assert!(payload.contains("inst.ks=http://10.0.2.2:0/boot/fedora/uefi/kickstart/ks.cfg"));
     }
 }
