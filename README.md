@@ -38,8 +38,6 @@ Out of scope in v1:
 - `BOOPA_TFTP_ADVERTISE_ADDR` default: the TFTP bind address when it is guest-usable, otherwise `127.0.0.1:<tftp-port>`
 - `BOOPA_DATA_DIR` default: `var/boopa`
 - `BOOPA_FRONTEND_DIR` default: `frontend/dist`
-- Legacy aliases `NETWORK_BOOTD_API_BIND`, `NETWORK_BOOTD_TFTP_BIND`, `NETWORK_BOOTD_TFTP_ADVERTISE_ADDR`, `NETWORK_BOOTD_DATA_DIR`, and `NETWORK_BOOTD_FRONTEND_DIR` are still accepted during the rename transition.
-- If no data-dir env var is set and `var/boopa` does not exist yet, `boopa` falls back to `var/network-bootd` when that legacy directory is present.
 
 ## API
 
@@ -71,7 +69,6 @@ Frontend dev proxy:
 
 - `npm run dev --prefix frontend` proxies `/api` and `/boot` to `http://127.0.0.1:8080`
 - Override the dev backend target with `BOOPA_DEV_BACKEND=http://host:port npm run dev --prefix frontend`
-- Legacy alias `NETWORK_BOOTD_DEV_BACKEND` is also accepted.
 
 Smoke scripts:
 

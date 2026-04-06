@@ -2,7 +2,7 @@
 members = [
     "crates/boot-recipe",
     "crates/image-cache",
-    "crates/network-bootd",
+    "crates/boopa",
 ]
 resolver = "2"
 

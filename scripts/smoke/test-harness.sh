@@ -9,8 +9,17 @@ trap 'rm -rf "${TMP_DIR}"' EXIT
 assert_contains() {
   local needle="$1"
   local file_path="$2"
-  if ! grep -F -q "${needle}" "${file_path}"; then
+  if ! grep -F -q -- "${needle}" "${file_path}"; then
     echo "expected to find '${needle}' in ${file_path}" >&2
+    exit 1
+  fi
+}
+
+assert_not_contains() {
+  local needle="$1"
+  local file_path="$2"
+  if grep -F -q -- "${needle}" "${file_path}"; then
+    echo "did not expect to find '${needle}' in ${file_path}" >&2
     exit 1
   fi
 }
@@ -64,6 +73,10 @@ INITRD_PATH="${TMP_DIR}/work/ubuntu-uefi-20260405T170000Z/boot-root/ubuntu/uefi/
 assert_contains "file=fat:rw:${TMP_DIR}/work/ubuntu-uefi-20260405T170000Z/boot-root" "${QEMU_CMD_LOG}"
 assert_contains "BOOTX64.EFI" "${STARTUP_NSH}"
 assert_contains "file=fat:rw:${TMP_DIR}/work/ubuntu-uefi-20260405T170000Z/boot-root" "${QEMU_CMD_LOG}"
+assert_not_contains "-kernel" "${QEMU_CMD_LOG}"
+assert_not_contains "-initrd" "${QEMU_CMD_LOG}"
+assert_not_contains "/boot-root/ubuntu/uefi/kernel" "${QEMU_CMD_LOG}"
+assert_not_contains "/boot-root/ubuntu/uefi/initrd" "${QEMU_CMD_LOG}"
 
 assert_missing "${GRUB_CFG}"
 assert_missing "${GRUB_CFG_ALIAS}"
@@ -77,6 +90,7 @@ SYNC_GRUB_CFG="${SYNC_BOOT_ROOT}/grub/grub.cfg"
 SYNC_GRUB_CFG_ALIAS="${SYNC_BOOT_ROOT}/boot/grub/grub.cfg"
 SYNC_UBUNTU_GRUB_CFG="${SYNC_BOOT_ROOT}/ubuntu/uefi/grub.cfg"
 SYNC_GRUB_CFG_ALIAS_NESTED="${SYNC_BOOT_ROOT}/ubuntu/uefi/grub/grub.cfg"
+FETCH_LOG="${SYNC_RUN_DIR}/fetch.log"
 
 (
   set -euo pipefail
@@ -87,7 +101,28 @@ SYNC_GRUB_CFG_ALIAS_NESTED="${SYNC_BOOT_ROOT}/ubuntu/uefi/grub/grub.cfg"
     local asset_path="$1"
     local destination_path="$2"
     mkdir -p "$(dirname "${destination_path}")"
-    printf '%s\n' "${asset_path}" >"${destination_path}"
+    printf '%s\n' "${asset_path}" >>"${FETCH_LOG}"
+    case "${asset_path}" in
+      "ubuntu/uefi/grubx64.efi")
+        printf 'shim-from-boopa\n' >"${destination_path}"
+        ;;
+      "ubuntu/uefi/grub.cfg")
+        cat >"${destination_path}" <<'EOF'
+set default=0
+set timeout=2
+
+menuentry "boopa ubuntu uefi smoke" {
+    linux /ubuntu/uefi/kernel ip=dhcp console=ttyS0,115200n8 ---
+    initrd /ubuntu/uefi/initrd
+    boot
+}
+EOF
+        ;;
+      *)
+        echo "unexpected backend fetch for ${asset_path}" >&2
+        exit 1
+        ;;
+    esac
   }
 
   SMOKE_RUN_DIR="${SYNC_RUN_DIR}"
@@ -103,10 +138,20 @@ SYNC_GRUB_CFG_ALIAS_NESTED="${SYNC_BOOT_ROOT}/ubuntu/uefi/grub/grub.cfg"
 [[ -f "${SYNC_GRUB_CFG_ALIAS}" ]] || { echo "expected staged grub config at ${SYNC_GRUB_CFG_ALIAS}" >&2; exit 1; }
 [[ -f "${SYNC_UBUNTU_GRUB_CFG}" ]] || { echo "expected staged grub config at ${SYNC_UBUNTU_GRUB_CFG}" >&2; exit 1; }
 [[ -f "${SYNC_GRUB_CFG_ALIAS_NESTED}" ]] || { echo "expected staged grub config at ${SYNC_GRUB_CFG_ALIAS_NESTED}" >&2; exit 1; }
+[[ -f "${FETCH_LOG}" ]] || { echo "expected fetch log at ${FETCH_LOG}" >&2; exit 1; }
 
-assert_contains "ubuntu/uefi/grub.cfg" "${SYNC_GRUB_CFG}"
-assert_contains "ubuntu/uefi/grub.cfg" "${SYNC_GRUB_CFG_ALIAS}"
-assert_contains "ubuntu/uefi/grub.cfg" "${SYNC_UBUNTU_GRUB_CFG}"
-assert_contains "ubuntu/uefi/grub.cfg" "${SYNC_GRUB_CFG_ALIAS_NESTED}"
+assert_contains "ubuntu/uefi/grubx64.efi" "${FETCH_LOG}"
+assert_contains "ubuntu/uefi/grub.cfg" "${FETCH_LOG}"
+assert_not_contains "ubuntu/uefi/kernel" "${FETCH_LOG}"
+assert_not_contains "ubuntu/uefi/initrd" "${FETCH_LOG}"
+
+assert_contains "linux /ubuntu/uefi/kernel" "${SYNC_GRUB_CFG}"
+assert_contains "initrd /ubuntu/uefi/initrd" "${SYNC_GRUB_CFG}"
+assert_contains "linux /ubuntu/uefi/kernel" "${SYNC_GRUB_CFG_ALIAS}"
+assert_contains "initrd /ubuntu/uefi/initrd" "${SYNC_GRUB_CFG_ALIAS}"
+assert_contains "linux /ubuntu/uefi/kernel" "${SYNC_UBUNTU_GRUB_CFG}"
+assert_contains "initrd /ubuntu/uefi/initrd" "${SYNC_UBUNTU_GRUB_CFG}"
+assert_contains "linux /ubuntu/uefi/kernel" "${SYNC_GRUB_CFG_ALIAS_NESTED}"
+assert_contains "initrd /ubuntu/uefi/initrd" "${SYNC_GRUB_CFG_ALIAS_NESTED}"
 
 echo "smoke harness dry-run regression checks passed"

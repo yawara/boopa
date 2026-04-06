@@ -103,8 +103,6 @@ smoke_configure_paths() {
     SMOKE_SOURCE_DATA_DIR="${SMOKE_SOURCE_DATA_DIR}"
   elif [[ -d "${repo_root}/var/boopa" ]]; then
     SMOKE_SOURCE_DATA_DIR="${repo_root}/var/boopa"
-  elif [[ -d "${repo_root}/var/network-bootd" ]]; then
-    SMOKE_SOURCE_DATA_DIR="${repo_root}/var/network-bootd"
   else
     SMOKE_SOURCE_DATA_DIR="${repo_root}/var/boopa"
   fi

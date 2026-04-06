@@ -14,6 +14,7 @@ fn test_config(temp_dir: &TempDir) -> Config {
     Config {
         api_bind: ([127, 0, 0, 1], 0).into(),
         tftp_bind: ([127, 0, 0, 1], 0).into(),
+        tftp_advertise_addr: ([10, 0, 2, 2], 16969).into(),
         data_dir: temp_dir.path().join("data"),
         frontend_dir: temp_dir.path().join("frontend"),
     }
@@ -108,7 +109,8 @@ async fn tftp_resolves_seeded_ubuntu_uefi_static_assets() {
         let resolution = resolve_request(state.clone(), relative_path).await;
         let resolution = resolution.expect("resolution");
         assert_eq!(resolution.requested_path, relative_path);
-        assert_eq!(resolution.cache_relative_path, relative_path);
+        assert_eq!(resolution.served_path, relative_path);
+        assert!(!resolution.generated);
     }
 }
 
