@@ -68,17 +68,17 @@ Backend:
 
 Frontend:
 
-- `npm ci`
-- `npm run dev --workspace frontend`
-- `npm run test --workspace frontend`
-- `npm run typecheck --workspace frontend`
-- `npm run build --workspace frontend`
+- `npm ci --prefix frontend`
+- `npm run dev --prefix frontend`
+- `npm test --prefix frontend`
+- `npm run typecheck --prefix frontend`
+- `npm run build --prefix frontend`
 
 Frontend dev proxy:
 
-- The npm lockfile lives at the repository root as `package-lock.json`, and `frontend` is installed as an npm workspace.
-- `npm run dev --workspace frontend` proxies `/api` and `/boot` to `http://127.0.0.1:8080`
-- Override the dev backend target with `BOOPA_DEV_BACKEND=http://host:port npm run dev --workspace frontend`
+- The frontend npm package and lockfile both live under `frontend/`.
+- `npm run dev --prefix frontend` proxies `/api` and `/boot` to `http://127.0.0.1:8080`
+- Override the dev backend target with `BOOPA_DEV_BACKEND=http://host:port npm run dev --prefix frontend`
 
 Smoke scripts:
 
