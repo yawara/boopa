@@ -2,13 +2,10 @@ import type { ReactNode } from "react";
 import {
   Box,
   Container,
-  Image,
   Paper,
-  SimpleGrid,
   Stack,
-  Text,
-  Title,
-} from "@mantine/core";
+  Typography,
+} from "@mui/material";
 
 import { DistroSelector } from "../components/DistroSelector";
 import { AutoinstallCard } from "../components/AutoinstallCard";
@@ -36,8 +33,8 @@ export function DashboardPage() {
 
   if (isLoading) {
     dashboardContent = (
-      <Paper p="xl">
-        <Text size="lg">Loading dashboard...</Text>
+      <Paper sx={{ p: 4 }}>
+        <Typography variant="h6">Loading dashboard...</Typography>
       </Paper>
     );
   } else {
@@ -48,7 +45,16 @@ export function DashboardPage() {
 
     dashboardContent = (
       <>
-        <SimpleGrid cols={{ base: 1, md: 2 }} spacing="lg">
+        <Box
+          sx={{
+            display: "grid",
+            gap: 3,
+            gridTemplateColumns: {
+              xs: "minmax(0, 1fr)",
+              md: "repeat(2, minmax(0, 1fr))",
+            },
+          }}
+        >
           <DistroSelector
             current={selected}
             distros={distrosData.distros}
@@ -67,17 +73,17 @@ export function DashboardPage() {
               }}
             />
           ) : (
-            <Paper p="xl">
-              <Text size="lg">Loading cache state...</Text>
+            <Paper sx={{ p: 4 }}>
+              <Typography variant="h6">Loading cache state...</Typography>
             </Paper>
           )}
-        </SimpleGrid>
+        </Box>
 
         {dhcpQuery.data ? (
           <DhcpGuideCard data={dhcpQuery.data} />
         ) : (
-          <Paper p="xl">
-            <Text size="lg">Loading DHCP guidance...</Text>
+          <Paper sx={{ p: 4 }}>
+            <Typography variant="h6">Loading DHCP guidance...</Typography>
           </Paper>
         )}
 
@@ -88,29 +94,42 @@ export function DashboardPage() {
 
   return (
     <Box component="main" className="app-shell">
-      <Container size="lg" py={{ base: "xl", md: "3rem" }}>
-        <Stack gap="xl">
-          <Paper className="hero-panel" p={{ base: "xl", md: "2rem" }}>
-            <Stack gap="lg">
-              <Image
-                src={boopaLogo}
-                alt="boopa logo"
-                className="hero-logo"
-                fit="contain"
-                w="100%"
-                maw={620}
-              />
-              <Stack gap="xs">
-                <Text c="boopaAccent.7" fw={700} fz="xs" lts="0.18em" tt="uppercase">
+      <Container maxWidth="lg" sx={{ py: { xs: 6, md: 8 } }}>
+        <Stack spacing={4}>
+          <Paper className="hero-panel" sx={{ p: { xs: 4, md: 5 } }}>
+            <Stack spacing={3}>
+              <Box className="hero-logo">
+                <Box
+                  component="img"
+                  src={boopaLogo}
+                  alt="boopa logo"
+                  sx={{
+                    display: "block",
+                    width: "100%",
+                    maxWidth: 620,
+                    height: "auto",
+                    objectFit: "contain",
+                  }}
+                />
+              </Box>
+              <Stack spacing={1}>
+                <Typography
+                  className="hero-kicker"
+                  color="primary.dark"
+                  fontSize="0.75rem"
+                  fontWeight={700}
+                  letterSpacing="0.18em"
+                  textTransform="uppercase"
+                >
                   Trusted LAN Control Plane
-                </Text>
-                <Title order={1} size="h4">
+                </Typography>
+                <Typography className="hero-title" component="h1" variant="h4">
                   boopa
-                </Title>
-                <Text c="slate.7" maw={720} size="lg">
+                </Typography>
+                <Typography color="text.secondary" maxWidth={720} variant="h6">
                   Switch the active distro, inspect the DHCP values the network needs, and verify
                   that the next BIOS and UEFI boots have cached assets ready.
-                </Text>
+                </Typography>
               </Stack>
             </Stack>
           </Paper>

@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
-import { MantineProvider } from "@mantine/core";
+import { CssBaseline } from "@mui/material";
+import { ThemeProvider } from "@mui/material/styles";
 import { Provider } from "react-redux";
 
 import type { AppStore } from "./store";
@@ -16,8 +17,9 @@ export function AppProviders({
   store = defaultStore,
 }: AppProvidersProps) {
   return (
-    <MantineProvider defaultColorScheme="light" theme={boopaTheme}>
+    <ThemeProvider theme={boopaTheme}>
+      <CssBaseline />
       <Provider store={store}>{children}</Provider>
-    </MantineProvider>
+    </ThemeProvider>
   );
 }

@@ -1,12 +1,11 @@
 import {
-  Badge,
+  Box,
   Button,
-  Group,
+  Chip,
   Paper,
   Stack,
-  Text,
-  Title,
-} from "@mantine/core";
+  Typography,
+} from "@mui/material";
 
 import type { CacheEntry, DistroId } from "../services/api";
 
@@ -18,9 +17,9 @@ interface CacheStatusCardProps {
 }
 
 const statusColor = {
-  missing: "orange",
-  cached: "teal",
-  refreshed: "blue",
+  missing: "warning",
+  cached: "success",
+  refreshed: "info",
 } as const;
 
 export function CacheStatusCard({
@@ -30,40 +29,55 @@ export function CacheStatusCard({
   onRefresh,
 }: CacheStatusCardProps) {
   return (
-    <Paper component="section" p="xl">
-      <Stack gap="md">
+    <Paper component="section" sx={{ p: 4 }}>
+      <Stack spacing={3}>
         <div>
-          <Text c="boopaAccent.7" fw={700} fz="xs" lts="0.16em" mb={6} tt="uppercase">
+          <Typography
+            color="primary.dark"
+            fontSize="0.75rem"
+            fontWeight={700}
+            letterSpacing="0.16em"
+            mb={0.75}
+            textTransform="uppercase"
+          >
             Cache State
-          </Text>
-          <Title order={2} size="h3">
+          </Typography>
+          <Typography component="h2" variant="h5">
             Asset readiness for {distro}
-          </Title>
+          </Typography>
         </div>
-        <Button disabled={isRefreshing} variant="gradient" onClick={onRefresh}>
+        <Button disabled={isRefreshing} variant="contained" onClick={onRefresh}>
           {isRefreshing ? "Refreshing..." : "Refresh Selected Assets"}
         </Button>
-        <Stack gap="sm">
+        <Stack spacing={2}>
           {entries.map((entry) => (
             <Paper
               key={`${entry.bootMode}-${entry.relativePath}`}
-              bg="rgba(255, 255, 255, 0.72)"
-              p="md"
-              radius="24px"
-              shadow="xs"
-              withBorder={false}
+              sx={{
+                p: 2,
+                borderRadius: 3,
+                bgcolor: "rgba(255, 255, 255, 0.72)",
+                border: "none",
+                boxShadow: "0 10px 24px rgba(39, 65, 82, 0.08)",
+              }}
             >
-              <Group align="flex-start" justify="space-between" wrap="wrap">
+              <Box
+                sx={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  justifyContent: "space-between",
+                  gap: 2,
+                  flexWrap: "wrap",
+                }}
+              >
                 <div>
-                  <Text fw={700}>{entry.logicalName}</Text>
-                  <Text c="slate.7" size="sm">
+                  <Typography fontWeight={700}>{entry.logicalName}</Typography>
+                  <Typography color="text.secondary" variant="body2">
                     {entry.relativePath}
-                  </Text>
+                  </Typography>
                 </div>
-                <Badge color={statusColor[entry.status]} tt="uppercase">
-                  {entry.status}
-                </Badge>
-              </Group>
+                <Chip color={statusColor[entry.status]} label={entry.status} size="small" />
+              </Box>
             </Paper>
           ))}
         </Stack>
