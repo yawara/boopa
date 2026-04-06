@@ -1,0 +1,7 @@
+{
+  "name": "boopa",
+  "private": true,
+  "workspaces": [
+    "frontend"
+  ]
+}
