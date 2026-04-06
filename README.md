@@ -12,7 +12,7 @@ This project is still in an early stage. Expect breaking changes, missing harden
 
 ## Scope
 
-- Rust backend with embedded HTTP and TFTP services
+- Rust backend with `actix-web` HTTP service and embedded TFTP service
 - React + TypeScript + RTK Query dashboard
 - Supported v1 distros: Ubuntu, Fedora, Arch Linux
 - Supported boot modes: BIOS and UEFI
@@ -35,10 +35,9 @@ Out of scope in v1:
 
 - `BOOPA_API_BIND` default: `127.0.0.1:8080`
 - `BOOPA_TFTP_BIND` default: `0.0.0.0:6969`
+- `BOOPA_TFTP_ADVERTISE_ADDR` default: the TFTP bind address when it is guest-usable, otherwise `127.0.0.1:<tftp-port>`
 - `BOOPA_DATA_DIR` default: `var/boopa`
 - `BOOPA_FRONTEND_DIR` default: `frontend/dist`
-- Legacy aliases `NETWORK_BOOTD_API_BIND`, `NETWORK_BOOTD_TFTP_BIND`, `NETWORK_BOOTD_DATA_DIR`, and `NETWORK_BOOTD_FRONTEND_DIR` are still accepted during the rename transition.
-- If no data-dir env var is set and `var/boopa` does not exist yet, `boopa` falls back to `var/network-bootd` when that legacy directory is present.
 
 ## API
 
@@ -48,6 +47,14 @@ Out of scope in v1:
 - `PUT /api/selection`
 - `GET /api/cache`
 - `POST /api/cache/refresh`
+
+Cache refresh behavior:
+
+- Cache refresh is manual only; assets are refreshed when `POST /api/cache/refresh` is called.
+- `boopa` persists asset hashes in `BOOPA_DATA_DIR/cache/manifest.json`.
+- If a recipe asset file already exists and its stored SHA-256 plus `source_url` still match, refresh skips re-downloading that asset.
+- If the file is missing, the hash differs, or the recipe `source_url` changed, refresh downloads the asset again and updates the manifest.
+- `force` refresh is not implemented yet.
 
 ## Verification
 
@@ -70,7 +77,6 @@ Frontend dev proxy:
 
 - `npm run dev --prefix frontend` proxies `/api` and `/boot` to `http://127.0.0.1:8080`
 - Override the dev backend target with `BOOPA_DEV_BACKEND=http://host:port npm run dev --prefix frontend`
-- Legacy alias `NETWORK_BOOTD_DEV_BACKEND` is also accepted.
 
 Smoke scripts:
 
@@ -90,11 +96,14 @@ Current scope of the concrete harness:
 
 - `scripts/smoke/boot-ubuntu-uefi.sh` is the only implemented target today.
 - Other smoke entrypoints fail fast with a clear "not implemented" message.
-- The harness stages real Ubuntu installer assets into a temporary data dir, starts `boopa`, then boots a QEMU UEFI guest.
-- The first-stage EFI bootloader is staged onto a temporary FAT boot volume with a generated `grub.cfg`.
-- Kernel and initrd are fetched from `boopa` over TFTP as `ubuntu/uefi/kernel` and `ubuntu/uefi/initrd`.
+- The harness starts `boopa`, refreshes the Ubuntu cache through `POST /api/cache/refresh`, and treats `boopa` as the only source of Ubuntu UEFI boot assets.
+- During smoke runs, `BOOPA_DATA_DIR/cache` is symlinked to `var/boopa/cache` (or `SMOKE_SOURCE_DATA_DIR/cache`) so cached assets and `manifest.json` are reused across runs.
+- If a temporary FAT boot volume is needed for the first-stage firmware handoff, it is limited to firmware-carrier files plus `boopa`-served copies of the bootloader and GRUB config.
+- `boopa` now generates and serves the Ubuntu UEFI `grub.cfg`; kernel and initrd are fetched from `boopa` over TFTP as `ubuntu/uefi/kernel` and `ubuntu/uefi/initrd`, while the generated `iso-url` points clients at `/boot/ubuntu/uefi/live-server.iso` over HTTP.
+- Ubuntu UEFI clients must reach both the advertised TFTP endpoint and `http://<boopa-host>:<api-port>/boot/ubuntu/uefi/live-server.iso`.
+- The Ubuntu UEFI smoke path defaults to `RAM_MB=8192` and provisions a `SYSTEM_DISK_GB=32` qcow2 installer disk because the live installer downloads a multi-gigabyte ISO before pivoting to the live filesystem.
 - The smoke harness picks random high unprivileged API/TFTP ports by default to avoid local port collisions.
-- When launched from an interactive terminal, the harness attaches QEMU serial I/O to that terminal so prompts like `Press any key to continue...` accept input directly. Set `SMOKE_INTERACTIVE=0` to force headless mode.
+- When launched from an interactive terminal, the harness attaches QEMU serial I/O to that terminal and enables a QEMU display window by default so VGA/installer output is visible. Set `SMOKE_INTERACTIVE=0` to force headless mode, or override the interactive display backend with `SMOKE_QEMU_DISPLAY` if `default` is not suitable on your host.
 - Success is log-based: ideal markers indicate installer/live progress, fallback markers indicate kernel/initrd handoff and boot continuation.
 
 Typical local smoke verification:

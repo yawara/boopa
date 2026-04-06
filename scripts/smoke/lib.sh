@@ -80,7 +80,8 @@ smoke_configure_paths() {
   local mode="$3"
 
   SMOKE_QEMU_BIN="${QEMU_BIN:-qemu-system-x86_64}"
-  SMOKE_RAM_MB="${RAM_MB:-4096}"
+  SMOKE_RAM_MB="${RAM_MB:-8192}"
+  SMOKE_SYSTEM_DISK_GB="${SYSTEM_DISK_GB:-32}"
   SMOKE_TIMEOUT_SECS="${SMOKE_TIMEOUT_SECS:-180}"
   SMOKE_WORK_ROOT="${SMOKE_WORK_ROOT:-${repo_root}/var/smoke-work}"
   SMOKE_TIMESTAMP="${SMOKE_TIMESTAMP:-$(date -u +%Y%m%dT%H%M%SZ)}"
@@ -93,6 +94,7 @@ smoke_configure_paths() {
   SMOKE_DEBUG_LOG="${SMOKE_LOG_DIR}/debugcon.log"
   SMOKE_QEMU_LOG="${SMOKE_LOG_DIR}/qemu.log"
   SMOKE_QEMU_CMD_LOG="${SMOKE_LOG_DIR}/qemu-command.txt"
+  SMOKE_SYSTEM_DISK_PATH="${SMOKE_RUN_DIR}/system-disk.qcow2"
   SMOKE_API_HOST="${SMOKE_API_HOST:-127.0.0.1}"
   SMOKE_API_BIND_HOST="${SMOKE_API_BIND_HOST:-0.0.0.0}"
   SMOKE_TFTP_BIND_HOST="${SMOKE_TFTP_BIND_HOST:-0.0.0.0}"
@@ -103,8 +105,6 @@ smoke_configure_paths() {
     SMOKE_SOURCE_DATA_DIR="${SMOKE_SOURCE_DATA_DIR}"
   elif [[ -d "${repo_root}/var/boopa" ]]; then
     SMOKE_SOURCE_DATA_DIR="${repo_root}/var/boopa"
-  elif [[ -d "${repo_root}/var/network-bootd" ]]; then
-    SMOKE_SOURCE_DATA_DIR="${repo_root}/var/network-bootd"
   else
     SMOKE_SOURCE_DATA_DIR="${repo_root}/var/boopa"
   fi
@@ -113,6 +113,7 @@ smoke_configure_paths() {
   SMOKE_DRY_RUN="${SMOKE_DRY_RUN:-0}"
   SMOKE_SKIP_DOWNLOADS="${SMOKE_SKIP_DOWNLOADS:-0}"
   SMOKE_QEMU_ACCEL="${SMOKE_QEMU_ACCEL:-tcg}"
+  SMOKE_QEMU_DISPLAY="${SMOKE_QEMU_DISPLAY:-default}"
   SMOKE_IDEAL_MARKERS="${SMOKE_IDEAL_MARKERS:-Reached target System Initialization|Ubuntu installer|Subiquity|Starting system log daemon}"
   SMOKE_FALLBACK_MARKERS="${SMOKE_FALLBACK_MARKERS:-Linux version|EFI stub:|Run /init as init process|Loading initial ramdisk|Freeing initrd memory}"
 }
@@ -120,13 +121,18 @@ smoke_configure_paths() {
 smoke_prepare_workspace() {
   mkdir -p \
     "${SMOKE_RUN_DIR}" \
-    "${SMOKE_SERVICE_DATA_DIR}/cache/ubuntu/uefi" \
+    "${SMOKE_SERVICE_DATA_DIR}" \
     "${SMOKE_TFTP_ROOT}/ubuntu/uefi" \
     "${SMOKE_TFTP_ROOT}/EFI/BOOT" \
-    "${SMOKE_TFTP_ROOT}/grub" \
-    "${SMOKE_TFTP_ROOT}/boot/grub" \
-    "${SMOKE_TFTP_ROOT}/ubuntu/uefi/grub" \
     "${SMOKE_LOG_DIR}"
+
+  if [[ "${SMOKE_SERVICE_DATA_DIR}/cache" == "${SMOKE_SOURCE_DATA_DIR}/cache" ]]; then
+    mkdir -p "${SMOKE_SERVICE_DATA_DIR}/cache"
+  else
+    mkdir -p "${SMOKE_SOURCE_DATA_DIR}/cache"
+    ln -s "${SMOKE_SOURCE_DATA_DIR}/cache" "${SMOKE_SERVICE_DATA_DIR}/cache"
+    smoke_log "linked smoke cache ${SMOKE_SERVICE_DATA_DIR}/cache -> ${SMOKE_SOURCE_DATA_DIR}/cache"
+  fi
 }
 
 smoke_prepare_firmware() {
@@ -134,6 +140,12 @@ smoke_prepare_firmware() {
   cp "${QEMU_FIRMWARE_VARS}" "${vars_copy}"
   SMOKE_QEMU_VARS_COPY="${vars_copy}"
   smoke_log "prepared writable firmware vars copy at ${SMOKE_QEMU_VARS_COPY}"
+}
+
+smoke_prepare_system_disk() {
+  smoke_log "preparing ${SMOKE_SYSTEM_DISK_GB}G installer disk at ${SMOKE_SYSTEM_DISK_PATH}"
+  rm -f "${SMOKE_SYSTEM_DISK_PATH}"
+  qemu-img create -f qcow2 "${SMOKE_SYSTEM_DISK_PATH}" "${SMOKE_SYSTEM_DISK_GB}G" >/dev/null
 }
 
 smoke_configure_interactive_mode() {
@@ -158,77 +170,32 @@ smoke_configure_interactive_mode() {
   esac
 }
 
-smoke_stage_asset() {
-  local asset_name="$1"
-  local source_path="${SMOKE_CACHE_SOURCE_DIR}/${asset_name}"
-  local destination_path="${SMOKE_SERVICE_DATA_DIR}/cache/ubuntu/uefi/${asset_name}"
-
-  [[ -f "${source_path}" ]] || smoke_die "missing source asset metadata at ${source_path}"
-
-  if [[ "${SMOKE_DRY_RUN}" == "1" || "${SMOKE_SKIP_DOWNLOADS}" == "1" ]]; then
-    cp "${source_path}" "${destination_path}"
-    return 0
-  fi
-
-  local source_url
-  source_url="$(<"${source_path}")"
-  if [[ "${source_url}" =~ ^https?:// ]]; then
-    smoke_log "downloading ${asset_name} from ${source_url}"
-    curl -fsSL --retry 3 --retry-delay 1 "${source_url}" -o "${destination_path}"
-  else
-    smoke_log "copying local asset ${asset_name} from ${source_path}"
-    cp "${source_path}" "${destination_path}"
-  fi
-}
-
-smoke_render_grub_cfg() {
-  cat <<EOF
-set default=0
-set timeout=2
-set pager=1
-
-insmod efinet
-insmod net
-insmod tftp
-net_bootp
-set root=(tftp,${SMOKE_GUEST_HOST_IP}:${SMOKE_TFTP_PORT})
-
-menuentry "boopa ubuntu uefi smoke" {
-    echo "Booting Ubuntu UEFI installer through boopa TFTP"
-    linux /ubuntu/uefi/kernel ip=dhcp console=ttyS0,115200n8 ---
-    initrd /ubuntu/uefi/initrd
-    boot
-}
-EOF
-}
-
-smoke_write_grub_configs() {
-  local config_contents
-  config_contents="$(smoke_render_grub_cfg)"
-  printf '%s\n' "${config_contents}" >"${SMOKE_TFTP_ROOT}/grub/grub.cfg"
-  printf '%s\n' "${config_contents}" >"${SMOKE_TFTP_ROOT}/boot/grub/grub.cfg"
-  printf '%s\n' "${config_contents}" >"${SMOKE_TFTP_ROOT}/ubuntu/uefi/grub.cfg"
-  printf '%s\n' "${config_contents}" >"${SMOKE_TFTP_ROOT}/ubuntu/uefi/grub/grub.cfg"
-}
-
 smoke_prepare_boot_root() {
-  smoke_log "staging Ubuntu UEFI boot assets under ${SMOKE_RUN_DIR}"
-  smoke_stage_asset "grubx64.efi"
-  smoke_stage_asset "kernel"
-  smoke_stage_asset "initrd"
-
-  cp "${SMOKE_SERVICE_DATA_DIR}/cache/ubuntu/uefi/grubx64.efi" "${SMOKE_TFTP_ROOT}/ubuntu/uefi/grubx64.efi"
-  cp "${SMOKE_SERVICE_DATA_DIR}/cache/ubuntu/uefi/grubx64.efi" "${SMOKE_TFTP_ROOT}/EFI/BOOT/BOOTX64.EFI"
+  smoke_log "preparing minimal UEFI firmware carrier under ${SMOKE_RUN_DIR}"
   cat >"${SMOKE_TFTP_ROOT}/startup.nsh" <<'EOF'
 fs0:\EFI\BOOT\BOOTX64.EFI
 fs1:\EFI\BOOT\BOOTX64.EFI
 EOF
-  smoke_write_grub_configs
+  if [[ "${SMOKE_DRY_RUN}" == "1" ]]; then
+    smoke_seed_dry_run_bootloader
+  fi
   smoke_log "boot volume prepared at ${SMOKE_TFTP_ROOT}"
+}
+
+smoke_seed_dry_run_bootloader() {
+  local source_path="${SMOKE_CACHE_SOURCE_DIR}/grubx64.efi"
+  local destination_path="${SMOKE_TFTP_ROOT}/EFI/BOOT/BOOTX64.EFI"
+
+  if [[ -f "${source_path}" ]]; then
+    cp "${source_path}" "${destination_path}"
+  else
+    printf 'dry-run placeholder bootloader\n' >"${destination_path}"
+  fi
 }
 
 smoke_preflight() {
   smoke_require_command "${SMOKE_QEMU_BIN}"
+  smoke_require_command qemu-img
   smoke_require_command curl
   smoke_require_command cargo
 
@@ -266,6 +233,7 @@ smoke_start_backend() {
     cd "${SMOKE_REPO_ROOT}"
     BOOPA_API_BIND="${SMOKE_API_BIND_HOST}:${SMOKE_API_PORT}" \
     BOOPA_TFTP_BIND="${SMOKE_TFTP_BIND_HOST}:${SMOKE_TFTP_PORT}" \
+    BOOPA_TFTP_ADVERTISE_ADDR="${SMOKE_GUEST_HOST_IP}:${SMOKE_TFTP_PORT}" \
     BOOPA_DATA_DIR="${SMOKE_SERVICE_DATA_DIR}" \
     BOOPA_FRONTEND_DIR="${SMOKE_FRONTEND_DIR}" \
     cargo run -p boopa --quiet
@@ -291,10 +259,48 @@ smoke_wait_for_backend() {
   smoke_die "boopa did not become healthy; see ${SMOKE_BACKEND_LOG}"
 }
 
+smoke_refresh_backend_assets() {
+  smoke_log "refreshing Ubuntu assets through boopa"
+  curl -fsS \
+    -X POST \
+    -H 'content-type: application/json' \
+    --data '{"distro":"ubuntu"}' \
+    "http://${SMOKE_API_HOST}:${SMOKE_API_PORT}/api/cache/refresh" \
+    -o /dev/null
+}
+
+smoke_fetch_backend_asset() {
+  local asset_path="$1"
+  local destination_path="$2"
+
+  mkdir -p "$(dirname "${destination_path}")"
+  curl -fsS "http://${SMOKE_API_HOST}:${SMOKE_API_PORT}/boot/${asset_path}" -o "${destination_path}"
+}
+
+smoke_sync_boot_root_from_backend() {
+  local fetched_grub_cfg="${SMOKE_RUN_DIR}/grub.cfg"
+
+  smoke_log "syncing firmware-carrier assets from boopa"
+  smoke_fetch_backend_asset "ubuntu/uefi/grubx64.efi" "${SMOKE_TFTP_ROOT}/EFI/BOOT/BOOTX64.EFI"
+  smoke_fetch_backend_asset "ubuntu/uefi/grub.cfg" "${fetched_grub_cfg}"
+  mkdir -p \
+    "${SMOKE_TFTP_ROOT}/grub" \
+    "${SMOKE_TFTP_ROOT}/boot/grub" \
+    "${SMOKE_TFTP_ROOT}/ubuntu/uefi/grub"
+  cp "${fetched_grub_cfg}" "${SMOKE_TFTP_ROOT}/grub/grub.cfg"
+  cp "${fetched_grub_cfg}" "${SMOKE_TFTP_ROOT}/boot/grub/grub.cfg"
+  cp "${fetched_grub_cfg}" "${SMOKE_TFTP_ROOT}/ubuntu/uefi/grub.cfg"
+  cp "${fetched_grub_cfg}" "${SMOKE_TFTP_ROOT}/ubuntu/uefi/grub/grub.cfg"
+  rm -f "${fetched_grub_cfg}"
+}
+
 smoke_probe_assets() {
   smoke_log "probing backend boot asset endpoints before guest boot"
+  curl -fsS "http://${SMOKE_API_HOST}:${SMOKE_API_PORT}/boot/ubuntu/uefi/grubx64.efi" -o /dev/null
+  curl -fsS "http://${SMOKE_API_HOST}:${SMOKE_API_PORT}/boot/ubuntu/uefi/grub.cfg" -o /dev/null
   curl -fsS "http://${SMOKE_API_HOST}:${SMOKE_API_PORT}/boot/ubuntu/uefi/kernel" -o /dev/null
   curl -fsS "http://${SMOKE_API_HOST}:${SMOKE_API_PORT}/boot/ubuntu/uefi/initrd" -o /dev/null
+  curl -fsS "http://${SMOKE_API_HOST}:${SMOKE_API_PORT}/boot/ubuntu/uefi/live-server.iso" -o /dev/null
   smoke_log "backend asset probes succeeded"
 }
 
@@ -319,6 +325,7 @@ smoke_start_qemu() {
     -drive "if=pflash,format=raw,readonly=on,file=${QEMU_FIRMWARE_CODE}"
     -drive "if=pflash,format=raw,file=${SMOKE_QEMU_VARS_COPY}"
     -drive "file=fat:rw:${SMOKE_TFTP_ROOT},format=raw,if=ide,index=0"
+    -drive "file=${SMOKE_SYSTEM_DISK_PATH},format=qcow2,if=virtio"
     -netdev "user,id=net0,ipv6=off"
     -device "e1000,netdev=net0"
     -no-reboot
@@ -330,7 +337,7 @@ smoke_start_qemu() {
       -machine q35
       -accel "${SMOKE_QEMU_ACCEL}"
       -m "${SMOKE_RAM_MB}"
-      -display none
+      -display "${SMOKE_QEMU_DISPLAY}"
       -monitor none
       -serial stdio
       -debugcon "file:${SMOKE_DEBUG_LOG}"
@@ -339,6 +346,7 @@ smoke_start_qemu() {
       -drive "if=pflash,format=raw,readonly=on,file=${QEMU_FIRMWARE_CODE}"
       -drive "if=pflash,format=raw,file=${SMOKE_QEMU_VARS_COPY}"
       -drive "file=fat:rw:${SMOKE_TFTP_ROOT},format=raw,if=ide,index=0"
+      -drive "file=${SMOKE_SYSTEM_DISK_PATH},format=qcow2,if=virtio"
       -netdev "user,id=net0,ipv6=off"
       -device "e1000,netdev=net0"
       -no-reboot
@@ -356,6 +364,7 @@ smoke_start_qemu() {
     smoke_log "starting qemu in interactive mode; command saved to ${SMOKE_QEMU_CMD_LOG}"
     smoke_log "input is attached to this terminal; press keys here when firmware or GRUB asks"
     smoke_log "serial session is being recorded to ${SMOKE_SERIAL_LOG}"
+    smoke_log "QEMU display mode: ${SMOKE_QEMU_DISPLAY}"
     script -q -F "${SMOKE_SERIAL_LOG}" "${qemu_cmd[@]}"
   else
     smoke_log "starting qemu; command saved to ${SMOKE_QEMU_CMD_LOG}"
@@ -427,6 +436,10 @@ Smoke target: ubuntu uefi
 Run dir: ${SMOKE_RUN_DIR}
 API base: http://${SMOKE_API_HOST}:${SMOKE_API_PORT}
 TFTP endpoint: ${SMOKE_GUEST_HOST_IP}:${SMOKE_TFTP_PORT}
+Ubuntu ISO URL: http://${SMOKE_GUEST_HOST_IP}:${SMOKE_API_PORT}/boot/ubuntu/uefi/live-server.iso
+Guest RAM: ${SMOKE_RAM_MB} MiB
+Installer disk: ${SMOKE_SYSTEM_DISK_PATH} (${SMOKE_SYSTEM_DISK_GB}G)
+Interactive display: ${SMOKE_QEMU_DISPLAY}
 QEMU: ${SMOKE_QEMU_BIN}
 Firmware code: ${QEMU_FIRMWARE_CODE}
 Firmware vars: ${QEMU_FIRMWARE_VARS}
@@ -449,6 +462,7 @@ smoke_main() {
   smoke_preflight
   smoke_prepare_workspace
   smoke_prepare_firmware
+  smoke_prepare_system_disk
 
   trap 'smoke_cleanup $?' EXIT
 
@@ -462,6 +476,8 @@ smoke_main() {
 
   smoke_start_backend
   smoke_wait_for_backend
+  smoke_refresh_backend_assets
+  smoke_sync_boot_root_from_backend
   smoke_probe_assets
   smoke_start_qemu
   if [[ "${SMOKE_INTERACTIVE}" == "1" ]]; then

@@ -2,7 +2,7 @@
 members = [
     "crates/boot-recipe",
     "crates/image-cache",
-    "crates/network-bootd",
+    "crates/boopa",
 ]
 resolver = "2"
 
@@ -12,18 +12,18 @@ license = "MIT"
 version = "0.1.0"
 
 [workspace.dependencies]
+actix-files = "0.6"
+actix-web = "4"
 anyhow = "1.0"
-axum = { version = "0.8", features = ["json", "macros"] }
 boot-recipe = { path = "crates/boot-recipe" }
 chrono = { version = "0.4", features = ["clock", "serde"] }
 image-cache = { path = "crates/image-cache" }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+sha2 = "0.10"
 tempfile = "3.20"
 thiserror = "2.0"
-tokio = { version = "1.44", features = ["macros", "rt-multi-thread", "net", "fs", "signal", "sync", "time"] }
-tower = { version = "0.5", features = ["util"] }
-tower-http = { version = "0.6", features = ["fs", "trace"] }
+tokio = { version = "1.44", features = ["macros", "rt-multi-thread", "net", "fs", "io-util", "process", "signal", "sync", "time"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }

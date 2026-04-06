@@ -1,3 +1,13 @@
+import {
+  Badge,
+  Button,
+  Group,
+  Paper,
+  Stack,
+  Text,
+  Title,
+} from "@mantine/core";
+
 import type { CacheEntry, DistroId } from "../services/api";
 
 interface CacheStatusCardProps {
@@ -7,6 +17,12 @@ interface CacheStatusCardProps {
   onRefresh: () => void;
 }
 
+const statusColor = {
+  missing: "orange",
+  cached: "teal",
+  refreshed: "blue",
+} as const;
+
 export function CacheStatusCard({
   distro,
   entries,
@@ -14,25 +30,44 @@ export function CacheStatusCard({
   onRefresh,
 }: CacheStatusCardProps) {
   return (
-    <section className="card">
-      <div className="card-header">
-        <p className="eyebrow">Cache State</p>
-        <h2>Asset readiness for {distro}</h2>
-      </div>
-      <button className="action-button" disabled={isRefreshing} onClick={onRefresh}>
-        {isRefreshing ? "Refreshing..." : "Refresh Selected Assets"}
-      </button>
-      <ul className="asset-list">
-        {entries.map((entry) => (
-          <li key={`${entry.bootMode}-${entry.relativePath}`} className="asset-row">
-            <div>
-              <strong>{entry.logicalName}</strong>
-              <p>{entry.relativePath}</p>
-            </div>
-            <span className={`status-pill status-${entry.status}`}>{entry.status}</span>
-          </li>
-        ))}
-      </ul>
-    </section>
+    <Paper component="section" p="xl">
+      <Stack gap="md">
+        <div>
+          <Text c="boopaAccent.7" fw={700} fz="xs" lts="0.16em" mb={6} tt="uppercase">
+            Cache State
+          </Text>
+          <Title order={2} size="h3">
+            Asset readiness for {distro}
+          </Title>
+        </div>
+        <Button disabled={isRefreshing} variant="gradient" onClick={onRefresh}>
+          {isRefreshing ? "Refreshing..." : "Refresh Selected Assets"}
+        </Button>
+        <Stack gap="sm">
+          {entries.map((entry) => (
+            <Paper
+              key={`${entry.bootMode}-${entry.relativePath}`}
+              bg="rgba(255, 255, 255, 0.72)"
+              p="md"
+              radius="24px"
+              shadow="xs"
+              withBorder={false}
+            >
+              <Group align="flex-start" justify="space-between" wrap="wrap">
+                <div>
+                  <Text fw={700}>{entry.logicalName}</Text>
+                  <Text c="slate.7" size="sm">
+                    {entry.relativePath}
+                  </Text>
+                </div>
+                <Badge color={statusColor[entry.status]} tt="uppercase">
+                  {entry.status}
+                </Badge>
+              </Group>
+            </Paper>
+          ))}
+        </Stack>
+      </Stack>
+    </Paper>
   );
 }

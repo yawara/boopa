@@ -20,3 +20,19 @@ fn builds_non_empty_recipes_for_every_mode() {
         }
     }
 }
+
+#[test]
+fn ubuntu_uefi_recipe_includes_live_server_iso_asset() {
+    let recipe = get_recipe(DistroId::Ubuntu, BootMode::Uefi).expect("recipe");
+    let iso_asset = recipe
+        .assets
+        .into_iter()
+        .find(|asset| asset.relative_path == "ubuntu/uefi/live-server.iso")
+        .expect("ubuntu uefi iso asset");
+
+    assert_eq!(iso_asset.logical_name, "iso");
+    assert_eq!(
+        iso_asset.source_url,
+        "https://releases.ubuntu.com/24.04/ubuntu-24.04.4-live-server-amd64.iso"
+    );
+}

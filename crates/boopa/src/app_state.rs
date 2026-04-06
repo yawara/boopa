@@ -4,6 +4,7 @@ use anyhow::Result;
 use boot_recipe::{BootMode, DhcpGuidance, DistroId, all_distros, get_recipe};
 use image_cache::{CacheEntry, ImageCache};
 
+use crate::boot_assets::{BootAssetTransport, ResolvedBootAsset};
 use crate::config::Config;
 use crate::persistence::{PersistedSelection, load_selection, save_selection};
 
@@ -51,7 +52,14 @@ impl AppState {
     pub async fn dhcp_guide(&self, distro: Option<DistroId>) -> Result<DhcpResponse> {
         let selected = distro.unwrap_or(self.selected_distro().await);
         let bios = get_recipe(selected, BootMode::Bios)?.dhcp;
-        let uefi = get_recipe(selected, BootMode::Uefi)?.dhcp;
+        let mut uefi = get_recipe(selected, BootMode::Uefi)?.dhcp;
+
+        if selected == DistroId::Ubuntu {
+            uefi.notes.push(format!(
+                "Generated grub.cfg injects iso-url={}; boot clients must reach boopa's HTTP port in addition to TFTP.",
+                self.config.ubuntu_uefi_iso_url()
+            ));
+        }
 
         Ok(DhcpResponse {
             selected,
@@ -93,11 +101,18 @@ impl AppState {
         })
     }
 
-    pub async fn resolve_boot_path(&self, requested_path: &str) -> Option<std::path::PathBuf> {
+    pub async fn resolve_boot_asset(
+        &self,
+        requested_path: &str,
+        transport: BootAssetTransport,
+    ) -> Option<ResolvedBootAsset> {
         crate::boot_assets::resolve_asset(
             &self.config.cache_dir(),
             self.selected_distro().await,
             requested_path,
+            self.config.tftp_advertise_addr,
+            &self.config.guest_http_base_url(),
+            transport,
         )
     }
 }
