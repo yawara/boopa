@@ -1,14 +1,16 @@
 use std::sync::Arc;
 
-use axum::body::Body;
-use axum::http::{Request, StatusCode};
+use actix_web::{
+    App,
+    body::to_bytes,
+    http::StatusCode,
+    test::{self, TestRequest},
+};
 use boopa::app_state::AppState;
 use boopa::config::Config;
-use boopa::http::router;
+use boopa::http;
 use boot_recipe::DistroId;
-use http_body_util::BodyExt;
 use tempfile::tempdir;
-use tower::ServiceExt;
 
 fn test_config() -> (tempfile::TempDir, Config) {
     let temp_dir = tempdir().expect("temp dir");
@@ -22,42 +24,51 @@ fn test_config() -> (tempfile::TempDir, Config) {
     (temp_dir, config)
 }
 
-#[tokio::test]
+#[actix_web::test]
 async fn health_endpoint_returns_ok() {
     let (_temp_dir, config) = test_config();
     let state = Arc::new(AppState::new(config).await.expect("state"));
-    let app = router(state);
+    let app =
+        test::init_service(App::new().configure(|cfg| http::configure(cfg, state.clone()))).await;
 
-    let response = app
-        .oneshot(
-            Request::builder()
-                .uri("/api/health")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .expect("response");
+    let response =
+        test::call_service(&app, TestRequest::get().uri("/api/health").to_request()).await;
 
     assert_eq!(response.status(), StatusCode::OK);
 }
 
-#[tokio::test]
+#[actix_web::test]
+async fn frontend_fallback_returns_placeholder_html_when_assets_are_missing() {
+    let (_temp_dir, config) = test_config();
+    let state = Arc::new(AppState::new(config).await.expect("state"));
+    let app =
+        test::init_service(App::new().configure(|cfg| http::configure(cfg, state.clone()))).await;
+
+    let response =
+        test::call_service(&app, TestRequest::get().uri("/dashboard").to_request()).await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body()).await.expect("body");
+    let payload = String::from_utf8(body.to_vec()).expect("utf8");
+    assert!(payload.contains("frontend assets not built yet"));
+}
+
+#[actix_web::test]
 async fn selection_persists_across_restart() {
     let (_temp_dir, config) = test_config();
     let state = Arc::new(AppState::new(config.clone()).await.expect("state"));
-    let app = router(state.clone());
+    let app =
+        test::init_service(App::new().configure(|cfg| http::configure(cfg, state.clone()))).await;
 
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("PUT")
-                .uri("/api/selection")
-                .header("content-type", "application/json")
-                .body(Body::from(r#"{"distro":"fedora"}"#))
-                .unwrap(),
-        )
-        .await
-        .expect("selection response");
+    let response = test::call_service(
+        &app,
+        TestRequest::put()
+            .uri("/api/selection")
+            .insert_header(("content-type", "application/json"))
+            .set_payload(r#"{"distro":"fedora"}"#)
+            .to_request(),
+    )
+    .await;
 
     assert_eq!(response.status(), StatusCode::OK);
 
@@ -65,30 +76,18 @@ async fn selection_persists_across_restart() {
     assert_eq!(restarted.selected_distro().await, DistroId::Fedora);
 }
 
-#[tokio::test]
+#[actix_web::test]
 async fn dhcp_endpoint_returns_both_boot_modes_by_default() {
     let (_temp_dir, config) = test_config();
     let state = Arc::new(AppState::new(config).await.expect("state"));
-    let app = router(state);
+    let app =
+        test::init_service(App::new().configure(|cfg| http::configure(cfg, state.clone()))).await;
 
-    let response = app
-        .oneshot(
-            Request::builder()
-                .uri("/api/dhcp")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .expect("dhcp response");
+    let response = test::call_service(&app, TestRequest::get().uri("/api/dhcp").to_request()).await;
 
     assert_eq!(response.status(), StatusCode::OK);
 
-    let body = response
-        .into_body()
-        .collect()
-        .await
-        .expect("body")
-        .to_bytes();
+    let body = to_bytes(response.into_body()).await.expect("body");
     let payload = String::from_utf8(body.to_vec()).expect("utf8");
     assert!(payload.contains("bios"));
     assert!(payload.contains("uefi"));

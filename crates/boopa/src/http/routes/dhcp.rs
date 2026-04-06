@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
-use axum::Json;
-use axum::extract::{Query, State};
+use actix_web::{HttpResponse, web};
 use boot_recipe::DistroId;
 use serde::Deserialize;
 
@@ -13,19 +12,11 @@ pub struct DhcpQuery {
 }
 
 pub async fn get_dhcp(
-    State(state): State<Arc<AppState>>,
-    Query(query): Query<DhcpQuery>,
-) -> Result<Json<crate::app_state::DhcpResponse>, (axum::http::StatusCode, String)> {
-    state
-        .dhcp_guide(query.distro)
-        .await
-        .map(Json)
-        .map_err(internal_error)
-}
-
-fn internal_error(error: anyhow::Error) -> (axum::http::StatusCode, String) {
-    (
-        axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-        error.to_string(),
-    )
+    state: web::Data<Arc<AppState>>,
+    query: web::Query<DhcpQuery>,
+) -> HttpResponse {
+    match state.dhcp_guide(query.distro).await {
+        Ok(response) => HttpResponse::Ok().json(response),
+        Err(error) => HttpResponse::InternalServerError().body(error.to_string()),
+    }
 }

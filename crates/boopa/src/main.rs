@@ -6,7 +6,7 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env()
-                .or_else(|_| EnvFilter::try_new("boopa=info,tower_http=info"))
+                .or_else(|_| EnvFilter::try_new("boopa=info,actix_web=info"))
                 .context("failed to build log filter")?,
         )
         .init();

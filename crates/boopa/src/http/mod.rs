@@ -1,38 +1,18 @@
 use std::sync::Arc;
 
-use axum::{
-    Router,
-    body::Body,
-    extract::{Path, State},
-    http::{HeaderValue, StatusCode, header},
-    response::IntoResponse,
-    routing::{get, post, put},
+use std::path::{Component, Path, PathBuf};
+
+use actix_files::NamedFile;
+use actix_web::{
+    HttpRequest, HttpResponse,
+    web::{self, Data, ServiceConfig},
 };
-use tower_http::services::ServeDir;
 
 use crate::app_state::AppState;
 
 pub mod routes;
 
-pub fn router(state: Arc<AppState>) -> Router {
-    let static_assets =
-        ServeDir::new(state.config().frontend_dir.clone()).not_found_service(get(index_fallback));
-
-    Router::new()
-        .route("/api/health", get(routes::health::get_health))
-        .route("/api/distros", get(routes::distros::get_distros))
-        .route("/api/dhcp", get(routes::dhcp::get_dhcp))
-        .route("/api/cache", get(routes::cache::get_cache_status))
-        .route("/api/selection", put(routes::distros::put_selection))
-        .route("/api/cache/refresh", post(routes::cache::refresh_cache))
-        .route("/boot/{*path}", get(get_boot_asset))
-        .fallback_service(static_assets)
-        .with_state(state)
-}
-
-async fn index_fallback() -> impl IntoResponse {
-    axum::response::Html(
-        r#"<!doctype html>
+const INDEX_FALLBACK_HTML: &str = r#"<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -42,26 +22,111 @@ async fn index_fallback() -> impl IntoResponse {
   <body>
     <div id="root">frontend assets not built yet</div>
   </body>
-</html>"#,
-    )
+</html>"#;
+
+pub fn configure(cfg: &mut ServiceConfig, state: Arc<AppState>) {
+    cfg.app_data(Data::new(state))
+        .route("/api/health", web::get().to(routes::health::get_health))
+        .route("/api/distros", web::get().to(routes::distros::get_distros))
+        .route("/api/dhcp", web::get().to(routes::dhcp::get_dhcp))
+        .route("/api/cache", web::get().to(routes::cache::get_cache_status))
+        .route(
+            "/api/selection",
+            web::put().to(routes::distros::put_selection),
+        )
+        .route(
+            "/api/cache/refresh",
+            web::post().to(routes::cache::refresh_cache),
+        )
+        .route("/boot/{path:.*}", web::get().to(get_boot_asset))
+        .route("/", web::get().to(get_frontend_asset))
+        .route("/{path:.*}", web::get().to(get_frontend_asset));
 }
 
-async fn get_boot_asset(
-    State(state): State<Arc<AppState>>,
-    Path(path): Path<String>,
-) -> impl IntoResponse {
+async fn index_fallback() -> HttpResponse {
+    HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(INDEX_FALLBACK_HTML)
+}
+
+async fn get_boot_asset(state: Data<Arc<AppState>>, path: web::Path<String>) -> HttpResponse {
+    let path = path.into_inner();
+
     match state.resolve_boot_asset(&path).await {
         Some(asset) => match asset.read_bytes().await {
-            Ok(bytes) => {
-                let mut response = axum::response::Response::new(Body::from(bytes));
-                response.headers_mut().insert(
-                    header::CONTENT_TYPE,
-                    HeaderValue::from_static(asset.content_type()),
-                );
-                response.into_response()
-            }
-            Err(_) => StatusCode::NOT_FOUND.into_response(),
+            Ok(bytes) => HttpResponse::Ok()
+                .content_type(asset.content_type())
+                .body(bytes),
+            Err(_) => HttpResponse::NotFound().finish(),
         },
-        None => StatusCode::NOT_FOUND.into_response(),
+        None => HttpResponse::NotFound().finish(),
     }
+}
+
+async fn get_frontend_asset(
+    request: HttpRequest,
+    state: Data<Arc<AppState>>,
+    path: web::Path<String>,
+) -> actix_web::Result<HttpResponse> {
+    let requested_path = path.into_inner();
+    let frontend_dir = &state.config().frontend_dir;
+
+    if let Some(response) = serve_named_file(&request, frontend_dir, &requested_path).await? {
+        return Ok(response);
+    }
+
+    if let Some(response) = serve_named_file(&request, frontend_dir, "index.html").await? {
+        return Ok(response);
+    }
+
+    Ok(index_fallback().await)
+}
+
+async fn serve_named_file(
+    request: &HttpRequest,
+    frontend_dir: &Path,
+    requested_path: &str,
+) -> actix_web::Result<Option<HttpResponse>> {
+    let Some(path) = resolve_frontend_path(frontend_dir, requested_path).await else {
+        return Ok(None);
+    };
+
+    let file = NamedFile::open_async(path).await?;
+    Ok(Some(file.into_response(request)))
+}
+
+async fn resolve_frontend_path(frontend_dir: &Path, requested_path: &str) -> Option<PathBuf> {
+    let candidate = safe_join(frontend_dir, Path::new(requested_path))?;
+    let metadata = tokio::fs::metadata(&candidate).await.ok()?;
+
+    if metadata.is_file() {
+        return Some(candidate);
+    }
+
+    if metadata.is_dir() {
+        let index_path = candidate.join("index.html");
+        if tokio::fs::metadata(&index_path)
+            .await
+            .map(|metadata| metadata.is_file())
+            .unwrap_or(false)
+        {
+            return Some(index_path);
+        }
+    }
+
+    None
+}
+
+fn safe_join(base_dir: &Path, requested_path: &Path) -> Option<PathBuf> {
+    let mut joined = base_dir.to_path_buf();
+
+    for component in requested_path.components() {
+        match component {
+            Component::Normal(segment) => joined.push(segment),
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => return None,
+        }
+    }
+
+    Some(joined)
 }

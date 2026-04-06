@@ -7,15 +7,12 @@ pub mod tftp;
 
 use std::sync::Arc;
 
+use actix_web::{App, HttpServer};
 use app_state::AppState;
-use axum::serve;
-use tokio::net::TcpListener;
 use tracing::info;
 
 pub async fn run(config: config::Config) -> anyhow::Result<()> {
     let state = Arc::new(AppState::new(config.clone()).await?);
-    let router = http::router(state.clone());
-    let tcp_listener = TcpListener::bind(config.api_bind).await?;
 
     let tftp_state = state.clone();
     tokio::spawn(async move {
@@ -26,6 +23,13 @@ pub async fn run(config: config::Config) -> anyhow::Result<()> {
 
     info!(api_bind=%config.api_bind, tftp_bind=%config.tftp_bind, "boopa started");
 
-    serve(tcp_listener, router).await?;
+    HttpServer::new(move || {
+        let state = state.clone();
+        App::new().configure(move |cfg| http::configure(cfg, state.clone()))
+    })
+    .bind(config.api_bind)?
+    .run()
+    .await?;
+
     Ok(())
 }

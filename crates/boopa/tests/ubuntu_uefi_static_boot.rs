@@ -1,14 +1,14 @@
 use std::sync::Arc;
 
-use axum::{
-    body::Body,
-    http::{Request, StatusCode},
+use actix_web::{
+    App,
+    body::to_bytes,
+    http::StatusCode,
+    test::{self, TestRequest},
 };
-use boopa::{app_state::AppState, config::Config, http::router, tftp::resolve_request};
+use boopa::{app_state::AppState, config::Config, http, tftp::resolve_request};
 use boot_recipe::DistroId;
-use http_body_util::BodyExt;
 use tempfile::TempDir;
-use tower::ServiceExt;
 
 fn test_config(temp_dir: &TempDir) -> Config {
     Config {
@@ -46,36 +46,30 @@ async fn build_state(temp_dir: &TempDir) -> Arc<AppState> {
     Arc::new(AppState::new(test_config(temp_dir)).await.expect("state"))
 }
 
-#[tokio::test]
+#[actix_web::test]
 async fn http_serves_seeded_ubuntu_uefi_static_assets() {
     let temp_dir = tempfile::tempdir().expect("tempdir");
     let assets = seed_ubuntu_uefi_assets(&temp_dir).await;
-    let app = router(build_state(&temp_dir).await);
+    let state = build_state(&temp_dir).await;
+    let app =
+        test::init_service(App::new().configure(|cfg| http::configure(cfg, state.clone()))).await;
 
     for (relative_path, expected_bytes) in assets {
-        let response = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .uri(format!("/boot/{relative_path}"))
-                    .body(Body::empty())
-                    .expect("request"),
-            )
-            .await
-            .expect("response");
+        let response = test::call_service(
+            &app,
+            TestRequest::get()
+                .uri(&format!("/boot/{relative_path}"))
+                .to_request(),
+        )
+        .await;
 
         assert_eq!(response.status(), StatusCode::OK, "path: {relative_path}");
-        let body = response
-            .into_body()
-            .collect()
-            .await
-            .expect("body")
-            .to_bytes();
+        let body = to_bytes(response.into_body()).await.expect("body");
         assert_eq!(body.as_ref(), expected_bytes, "path: {relative_path}");
     }
 }
 
-#[tokio::test]
+#[actix_web::test]
 async fn http_rejects_ubuntu_uefi_assets_when_selected_distro_changes() {
     let temp_dir = tempfile::tempdir().expect("tempdir");
     seed_ubuntu_uefi_assets(&temp_dir).await;
@@ -84,17 +78,16 @@ async fn http_rejects_ubuntu_uefi_assets_when_selected_distro_changes() {
         .set_selected_distro(DistroId::Fedora)
         .await
         .expect("set selected distro");
-    let app = router(state);
+    let app =
+        test::init_service(App::new().configure(|cfg| http::configure(cfg, state.clone()))).await;
 
-    let response = app
-        .oneshot(
-            Request::builder()
-                .uri("/boot/ubuntu/uefi/grubx64.efi")
-                .body(Body::empty())
-                .expect("request"),
-        )
-        .await
-        .expect("response");
+    let response = test::call_service(
+        &app,
+        TestRequest::get()
+            .uri("/boot/ubuntu/uefi/grubx64.efi")
+            .to_request(),
+    )
+    .await;
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }

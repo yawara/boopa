@@ -12,7 +12,7 @@ This project is still in an early stage. Expect breaking changes, missing harden
 
 ## Scope
 
-- Rust backend with embedded HTTP and TFTP services
+- Rust backend with `actix-web` HTTP service and embedded TFTP service
 - React + TypeScript + RTK Query dashboard
 - Supported v1 distros: Ubuntu, Fedora, Arch Linux
 - Supported boot modes: BIOS and UEFI
