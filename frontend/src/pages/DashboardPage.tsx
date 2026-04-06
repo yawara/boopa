@@ -11,6 +11,7 @@ import {
 } from "@mantine/core";
 
 import { DistroSelector } from "../components/DistroSelector";
+import { AutoinstallCard } from "../components/AutoinstallCard";
 import { CacheStatusCard } from "../components/CacheStatusCard";
 import { DhcpGuideCard } from "../components/DhcpGuideCard";
 import boopaLogo from "../assets/boopa-logo.png";
@@ -79,6 +80,8 @@ export function DashboardPage() {
             <Text size="lg">Loading DHCP guidance...</Text>
           </Paper>
         )}
+
+        {selected === "ubuntu" ? <AutoinstallCard /> : null}
       </>
     );
   }

@@ -68,6 +68,7 @@ Backend:
 
 Frontend:
 
+- `npm ci --prefix frontend`
 - `npm run dev --prefix frontend`
 - `npm test --prefix frontend`
 - `npm run typecheck --prefix frontend`
@@ -75,6 +76,7 @@ Frontend:
 
 Frontend dev proxy:
 
+- The frontend npm package and lockfile both live under `frontend/`.
 - `npm run dev --prefix frontend` proxies `/api` and `/boot` to `http://127.0.0.1:8080`
 - Override the dev backend target with `BOOPA_DEV_BACKEND=http://host:port npm run dev --prefix frontend`
 

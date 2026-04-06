@@ -80,7 +80,7 @@ impl AssetDownloader for ReqwestDownloader {
             drop(file);
             tokio::fs::rename(&tmp_path, &destination).await?;
 
-            Ok(format!("{:x}", hasher.finalize()))
+            Ok(sha256_hex(hasher.finalize().as_slice()))
         })
     }
 }
@@ -367,6 +367,15 @@ fn parse_sha256_stdout(stdout: &[u8], command: Sha256Command) -> Result<String, 
     }
 
     Ok(token.to_ascii_lowercase())
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    let mut output = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        use std::fmt::Write as _;
+        let _ = write!(&mut output, "{byte:02x}");
+    }
+    output
 }
 
 async fn file_modified_unix(path: &Path) -> Result<Option<u64>, CacheError> {

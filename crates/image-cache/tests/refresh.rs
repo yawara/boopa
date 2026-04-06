@@ -85,5 +85,10 @@ async fn refresh_distro_writes_expected_ubuntu_uefi_assets() {
 fn sha256_hex(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
-    format!("{:x}", hasher.finalize())
+    hasher
+        .finalize()
+        .as_slice()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }

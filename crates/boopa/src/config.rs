@@ -42,6 +42,10 @@ impl Config {
         self.data_dir.join("selection.json")
     }
 
+    pub fn ubuntu_autoinstall_path(&self) -> PathBuf {
+        self.data_dir.join("ubuntu-autoinstall.json")
+    }
+
     pub fn guest_http_base_url(&self) -> String {
         format!(
             "http://{}:{}",
@@ -50,11 +54,24 @@ impl Config {
         )
     }
 
-    pub fn ubuntu_uefi_iso_url(&self) -> String {
+    pub fn guest_boot_url(&self, relative_path: &str) -> String {
         format!(
-            "{}/boot/ubuntu/uefi/live-server.iso",
-            self.guest_http_base_url()
+            "{}/boot/{}",
+            self.guest_http_base_url(),
+            relative_path.trim_start_matches('/')
         )
+    }
+
+    pub fn ubuntu_uefi_iso_url(&self) -> String {
+        self.guest_boot_url("ubuntu/uefi/live-server.iso")
+    }
+
+    pub fn ubuntu_uefi_autoinstall_seed_url(&self) -> String {
+        format!("{}/", self.guest_boot_url("ubuntu/uefi/autoinstall"))
+    }
+
+    pub fn fedora_uefi_kickstart_url(&self) -> String {
+        self.guest_boot_url("fedora/uefi/kickstart/ks.cfg")
     }
 }
 

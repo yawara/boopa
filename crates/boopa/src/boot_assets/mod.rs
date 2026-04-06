@@ -6,14 +6,27 @@ use std::{
 
 use boot_recipe::{BootMode, DistroId, get_recipe};
 
+use crate::autoinstall::{PersistedUbuntuAutoinstallConfig, render_meta_data, render_user_data};
+
 const BINARY_CONTENT_TYPE: &str = "application/octet-stream";
-const GRUB_CFG_CONTENT_TYPE: &str = "text/plain; charset=utf-8";
+const TEXT_CONTENT_TYPE: &str = "text/plain; charset=utf-8";
 const UBUNTU_UEFI_GRUB_CFG_ALIASES: [&str; 4] = [
     "ubuntu/uefi/grub.cfg",
     "ubuntu/uefi/grub/grub.cfg",
     "grub/grub.cfg",
     "boot/grub/grub.cfg",
 ];
+const FEDORA_UEFI_GRUB_CFG_ALIASES: [&str; 6] = [
+    "fedora/uefi/grub.cfg",
+    "fedora/uefi/grub/grub.cfg",
+    "grub/grub.cfg",
+    "boot/grub/grub.cfg",
+    "grub2/grub.cfg",
+    "boot/grub2/grub.cfg",
+];
+const UBUNTU_UEFI_AUTOINSTALL_USER_DATA_PATH: &str = "ubuntu/uefi/autoinstall/user-data";
+const UBUNTU_UEFI_AUTOINSTALL_META_DATA_PATH: &str = "ubuntu/uefi/autoinstall/meta-data";
+const FEDORA_UEFI_KICKSTART_PATH: &str = "fedora/uefi/kickstart/ks.cfg";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResolvedBootAsset {
@@ -81,11 +94,36 @@ pub fn resolve_asset(
     guest_http_base_url: &str,
     transport: BootAssetTransport,
 ) -> Option<ResolvedBootAsset> {
+    resolve_asset_with_ubuntu_autoinstall(
+        cache_root,
+        distro,
+        &PersistedUbuntuAutoinstallConfig::default(),
+        requested_path,
+        tftp_endpoint,
+        guest_http_base_url,
+        transport,
+    )
+}
+
+pub fn resolve_asset_with_ubuntu_autoinstall(
+    cache_root: &Path,
+    distro: DistroId,
+    ubuntu_autoinstall: &PersistedUbuntuAutoinstallConfig,
+    requested_path: &str,
+    tftp_endpoint: SocketAddr,
+    guest_http_base_url: &str,
+    transport: BootAssetTransport,
+) -> Option<ResolvedBootAsset> {
     let normalized = requested_path.trim_start_matches('/');
 
-    if let Some(asset) =
-        resolve_generated_asset(distro, normalized, tftp_endpoint, guest_http_base_url)
-    {
+    if let Some(asset) = resolve_generated_asset(
+        distro,
+        ubuntu_autoinstall,
+        normalized,
+        tftp_endpoint,
+        guest_http_base_url,
+        transport,
+    ) {
         return Some(asset);
     }
 
@@ -108,19 +146,50 @@ pub fn resolve_asset(
 
 fn resolve_generated_asset(
     distro: DistroId,
+    ubuntu_autoinstall: &PersistedUbuntuAutoinstallConfig,
     normalized: &str,
     tftp_endpoint: SocketAddr,
     guest_http_base_url: &str,
+    transport: BootAssetTransport,
 ) -> Option<ResolvedBootAsset> {
-    if distro == DistroId::Ubuntu && UBUNTU_UEFI_GRUB_CFG_ALIASES.contains(&normalized) {
-        return Some(ResolvedBootAsset::Generated {
-            logical_path: "ubuntu/uefi/grub.cfg".to_string(),
-            bytes: render_ubuntu_uefi_grub_cfg(tftp_endpoint, guest_http_base_url).into_bytes(),
-            content_type: GRUB_CFG_CONTENT_TYPE,
-        });
+    let generated = match distro {
+        DistroId::Ubuntu if UBUNTU_UEFI_GRUB_CFG_ALIASES.contains(&normalized) => Some((
+            "ubuntu/uefi/grub.cfg",
+            render_ubuntu_uefi_grub_cfg(tftp_endpoint, guest_http_base_url),
+            true,
+        )),
+        DistroId::Ubuntu if normalized == UBUNTU_UEFI_AUTOINSTALL_USER_DATA_PATH => Some((
+            UBUNTU_UEFI_AUTOINSTALL_USER_DATA_PATH,
+            render_user_data(ubuntu_autoinstall).ok()?,
+            false,
+        )),
+        DistroId::Ubuntu if normalized == UBUNTU_UEFI_AUTOINSTALL_META_DATA_PATH => Some((
+            UBUNTU_UEFI_AUTOINSTALL_META_DATA_PATH,
+            render_meta_data(ubuntu_autoinstall),
+            false,
+        )),
+        DistroId::Fedora if FEDORA_UEFI_GRUB_CFG_ALIASES.contains(&normalized) => Some((
+            "fedora/uefi/grub.cfg",
+            render_fedora_uefi_grub_cfg(tftp_endpoint, guest_http_base_url),
+            true,
+        )),
+        DistroId::Fedora if normalized == FEDORA_UEFI_KICKSTART_PATH => Some((
+            FEDORA_UEFI_KICKSTART_PATH,
+            render_fedora_uefi_kickstart(),
+            false,
+        )),
+        _ => None,
+    }?;
+
+    if !generated.2 && transport == BootAssetTransport::Tftp {
+        return None;
     }
 
-    None
+    Some(ResolvedBootAsset::Generated {
+        logical_path: generated.0.to_string(),
+        bytes: generated.1.into_bytes(),
+        content_type: TEXT_CONTENT_TYPE,
+    })
 }
 
 fn asset_is_available_over(transport: BootAssetTransport, path: &str) -> bool {
@@ -131,9 +200,21 @@ fn asset_is_available_over(transport: BootAssetTransport, path: &str) -> bool {
 }
 
 fn render_ubuntu_uefi_grub_cfg(tftp_endpoint: SocketAddr, guest_http_base_url: &str) -> String {
+    let autoinstall_seed = format!("{guest_http_base_url}/boot/ubuntu/uefi/autoinstall/");
     format!(
-        "set default=0\nset timeout=2\nset pager=1\n\ninsmod efinet\ninsmod net\ninsmod tftp\nnet_bootp\nset root=(tftp,{tftp_endpoint})\n\nmenuentry \"boopa ubuntu uefi smoke\" {{\n    echo \"Booting Ubuntu UEFI installer through boopa TFTP\"\n    linux /ubuntu/uefi/kernel ip=dhcp boot=casper iso-url={guest_http_base_url}/boot/ubuntu/uefi/live-server.iso console=ttyS0,115200n8 ---\n    initrd /ubuntu/uefi/initrd\n    boot\n}}\n"
+        "set default=0\nset timeout=2\nset pager=1\n\ninsmod efinet\ninsmod net\ninsmod tftp\nnet_bootp\nset root=(tftp,{tftp_endpoint})\n\nmenuentry \"boopa ubuntu uefi autoinstall\" {{\n    echo \"Booting Ubuntu UEFI autoinstall through boopa TFTP\"\n    linux /ubuntu/uefi/kernel ip=dhcp boot=casper iso-url={guest_http_base_url}/boot/ubuntu/uefi/live-server.iso autoinstall 'ds=nocloud-net;s={autoinstall_seed}' console=ttyS0,115200n8 ---\n    initrd /ubuntu/uefi/initrd\n    boot\n}}\n"
     )
+}
+
+fn render_fedora_uefi_grub_cfg(tftp_endpoint: SocketAddr, guest_http_base_url: &str) -> String {
+    let kickstart_url = format!("{guest_http_base_url}/boot/{FEDORA_UEFI_KICKSTART_PATH}");
+    format!(
+        "set default=0\nset timeout=2\nset pager=1\n\ninsmod efinet\ninsmod net\ninsmod tftp\nnet_bootp\nset root=(tftp,{tftp_endpoint})\n\nmenuentry \"boopa fedora uefi kickstart\" {{\n    echo \"Booting Fedora UEFI Kickstart through boopa TFTP\"\n    linuxefi /fedora/uefi/kernel ip=dhcp inst.ks={kickstart_url} console=ttyS0,115200n8\n    initrdefi /fedora/uefi/initrd\n    boot\n}}\n"
+    )
+}
+
+fn render_fedora_uefi_kickstart() -> String {
+    "lang en_US.UTF-8\nkeyboard us\ntimezone UTC --utc\nnetwork --bootproto=dhcp --device=link --activate\nrootpw --lock\ntext\nreboot\nzerombr\nclearpart --all --initlabel\nautopart\n%packages\n@^minimal-environment\n%end\n".to_string()
 }
 
 #[cfg(test)]
@@ -145,7 +226,12 @@ mod tests {
 
     use boot_recipe::DistroId;
 
-    use super::{BootAssetTransport, ResolvedBootAsset, resolve_asset};
+    use super::{
+        BootAssetTransport, FEDORA_UEFI_KICKSTART_PATH, ResolvedBootAsset,
+        UBUNTU_UEFI_AUTOINSTALL_USER_DATA_PATH, resolve_asset,
+        resolve_asset_with_ubuntu_autoinstall,
+    };
+    use crate::autoinstall::{PersistedUbuntuAutoinstallConfig, UbuntuStorageLayout};
 
     #[test]
     fn resolves_known_asset_path() {
@@ -203,6 +289,11 @@ mod tests {
         assert!(payload.contains("root=(tftp,10.0.2.2:16969)"));
         assert!(payload.contains("boot=casper"));
         assert!(payload.contains("iso-url=http://10.0.2.2:18080/boot/ubuntu/uefi/live-server.iso"));
+        assert!(payload.contains("autoinstall"));
+        assert!(
+            payload
+                .contains("ds=nocloud-net;s=http://10.0.2.2:18080/boot/ubuntu/uefi/autoinstall/")
+        );
     }
 
     #[test]
@@ -232,7 +323,7 @@ mod tests {
     }
 
     #[test]
-    fn generated_grub_config_is_unavailable_for_non_ubuntu_distros() {
+    fn generated_grub_config_is_unavailable_for_non_matching_distro() {
         let resolved = resolve_asset(
             Path::new("/tmp/cache"),
             DistroId::Fedora,
@@ -242,5 +333,90 @@ mod tests {
             BootAssetTransport::Http,
         );
         assert!(resolved.is_none());
+    }
+
+    #[test]
+    fn ubuntu_autoinstall_seed_assets_are_http_only() {
+        let user_data = resolve_asset_with_ubuntu_autoinstall(
+            Path::new("/tmp/cache"),
+            DistroId::Ubuntu,
+            &PersistedUbuntuAutoinstallConfig {
+                hostname: "custom-host".to_string(),
+                username: "ubuntu".to_string(),
+                password_hash: PersistedUbuntuAutoinstallConfig::default().password_hash,
+                locale: "ja_JP.UTF-8".to_string(),
+                keyboard_layout: "jp".to_string(),
+                timezone: "Asia/Tokyo".to_string(),
+                storage_layout: UbuntuStorageLayout::Lvm,
+                install_open_ssh: true,
+                allow_password_auth: false,
+                authorized_keys: vec!["ssh-ed25519 AAAA test@example".to_string()],
+                packages: vec!["curl".to_string(), "git".to_string()],
+            },
+            UBUNTU_UEFI_AUTOINSTALL_USER_DATA_PATH,
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 6969),
+            "http://127.0.0.1:8080",
+            BootAssetTransport::Http,
+        )
+        .expect("user-data");
+        assert!(user_data.is_generated());
+        let runtime = tokio::runtime::Runtime::new().expect("runtime");
+        let payload = String::from_utf8(runtime.block_on(user_data.read_bytes()).expect("bytes"))
+            .expect("utf8");
+        assert!(payload.contains("#cloud-config"));
+        assert!(payload.contains("autoinstall:"));
+        assert!(payload.contains("hostname: custom-host"));
+        assert!(payload.contains("layout: jp"));
+        assert!(payload.contains("name: lvm"));
+        assert!(payload.contains("- curl"));
+
+        let tftp_user_data = resolve_asset(
+            Path::new("/tmp/cache"),
+            DistroId::Ubuntu,
+            UBUNTU_UEFI_AUTOINSTALL_USER_DATA_PATH,
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 6969),
+            "http://127.0.0.1:8080",
+            BootAssetTransport::Tftp,
+        );
+        assert!(tftp_user_data.is_none());
+    }
+
+    #[test]
+    fn resolves_generated_fedora_uefi_grub_and_kickstart() {
+        let endpoint = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(10, 0, 2, 2)), 16969);
+        let grub = resolve_asset(
+            Path::new("/tmp/cache"),
+            DistroId::Fedora,
+            "grub/grub.cfg",
+            endpoint,
+            "http://10.0.2.2:18080",
+            BootAssetTransport::Tftp,
+        )
+        .expect("grub");
+        assert!(grub.is_generated());
+        assert_eq!(grub.logical_path(), "fedora/uefi/grub.cfg");
+        let runtime = tokio::runtime::Runtime::new().expect("runtime");
+        let grub_payload =
+            String::from_utf8(runtime.block_on(grub.read_bytes()).expect("bytes")).expect("utf8");
+        assert!(grub_payload.contains("linuxefi /fedora/uefi/kernel"));
+        assert!(
+            grub_payload
+                .contains("inst.ks=http://10.0.2.2:18080/boot/fedora/uefi/kickstart/ks.cfg")
+        );
+
+        let kickstart = resolve_asset(
+            Path::new("/tmp/cache"),
+            DistroId::Fedora,
+            FEDORA_UEFI_KICKSTART_PATH,
+            endpoint,
+            "http://10.0.2.2:18080",
+            BootAssetTransport::Http,
+        )
+        .expect("ks");
+        let kickstart_payload =
+            String::from_utf8(runtime.block_on(kickstart.read_bytes()).expect("bytes"))
+                .expect("utf8");
+        assert!(kickstart_payload.contains("lang en_US.UTF-8"));
+        assert!(kickstart_payload.contains("%packages"));
     }
 }

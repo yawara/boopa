@@ -7,6 +7,7 @@ use actix_web::{
     test::{self, TestRequest},
 };
 use boopa::app_state::AppState;
+use boopa::autoinstall::{default_password_hash, fingerprint_password_hash};
 use boopa::config::Config;
 use boopa::http;
 use boot_recipe::{BootMode, DistroId, get_recipe};
@@ -96,6 +97,161 @@ async fn dhcp_endpoint_returns_both_boot_modes_by_default() {
 }
 
 #[actix_web::test]
+async fn ubuntu_autoinstall_endpoint_returns_default_config_and_yaml() {
+    let (_temp_dir, config) = test_config();
+    let state = Arc::new(AppState::new(config).await.expect("state"));
+    let app =
+        test::init_service(App::new().configure(|cfg| http::configure(cfg, state.clone()))).await;
+
+    let response = test::call_service(
+        &app,
+        TestRequest::get()
+            .uri("/api/autoinstall/ubuntu")
+            .to_request(),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body()).await.expect("body");
+    let payload = String::from_utf8(body.to_vec()).expect("utf8");
+    assert!(payload.contains("\"hostname\":\"boopa-ubuntu\""));
+    assert!(payload.contains("\"hasPassword\":true"));
+    assert!(payload.contains("#cloud-config"));
+}
+
+#[actix_web::test]
+async fn ubuntu_autoinstall_endpoint_persists_config_and_reuses_password_hash_when_blank() {
+    let (_temp_dir, config) = test_config();
+    let state = Arc::new(AppState::new(config.clone()).await.expect("state"));
+    let app =
+        test::init_service(App::new().configure(|cfg| http::configure(cfg, state.clone()))).await;
+
+    let update_payload = serde_json::json!({
+        "hostname": "lab-node",
+        "username": "ubuntu",
+        "password": "correcthorsebattery",
+        "locale": "ja_JP.UTF-8",
+        "keyboardLayout": "jp",
+        "timezone": "Asia/Tokyo",
+        "storageLayout": "lvm",
+        "installOpenSsh": true,
+        "allowPasswordAuth": false,
+        "authorizedKeys": ["ssh-ed25519 AAAA test@example"],
+        "packages": ["curl", "git"]
+    });
+
+    let response = test::call_service(
+        &app,
+        TestRequest::put()
+            .uri("/api/autoinstall/ubuntu")
+            .insert_header(("content-type", "application/json"))
+            .set_payload(update_payload.to_string())
+            .to_request(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = to_bytes(response.into_body()).await.expect("body");
+    let payload: serde_json::Value = serde_json::from_slice(&body).expect("json");
+    assert_eq!(payload["config"]["hostname"], "lab-node");
+    assert_eq!(payload["config"]["storageLayout"], "lvm");
+    assert_eq!(payload["hasPassword"], true);
+    assert!(
+        payload["renderedYaml"]
+            .as_str()
+            .expect("yaml")
+            .contains("hostname: lab-node")
+    );
+
+    let persisted = tokio::fs::read(config.ubuntu_autoinstall_path())
+        .await
+        .expect("persisted file");
+    let persisted_json: serde_json::Value = serde_json::from_slice(&persisted).expect("json");
+    let first_hash = persisted_json["passwordHash"]
+        .as_str()
+        .expect("password hash")
+        .to_string();
+    assert_ne!(first_hash, default_password_hash());
+    assert_ne!(
+        fingerprint_password_hash(&first_hash),
+        fingerprint_password_hash("correcthorsebattery")
+    );
+
+    let response = test::call_service(
+        &app,
+        TestRequest::put()
+            .uri("/api/autoinstall/ubuntu")
+            .insert_header(("content-type", "application/json"))
+            .set_payload(
+                serde_json::json!({
+                    "hostname": "lab-node-2",
+                    "username": "ubuntu",
+                    "locale": "ja_JP.UTF-8",
+                    "keyboardLayout": "jp",
+                    "timezone": "Asia/Tokyo",
+                    "storageLayout": "lvm",
+                    "installOpenSsh": true,
+                    "allowPasswordAuth": false,
+                    "authorizedKeys": ["ssh-ed25519 AAAA test@example"],
+                    "packages": ["curl", "git"]
+                })
+                .to_string(),
+            )
+            .to_request(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let persisted = tokio::fs::read(config.ubuntu_autoinstall_path())
+        .await
+        .expect("persisted file");
+    let persisted_json: serde_json::Value = serde_json::from_slice(&persisted).expect("json");
+    assert_eq!(persisted_json["hostname"], "lab-node-2");
+    assert_eq!(persisted_json["passwordHash"], first_hash);
+}
+
+#[actix_web::test]
+async fn ubuntu_autoinstall_endpoint_rejects_invalid_payload() {
+    let (_temp_dir, config) = test_config();
+    let state = Arc::new(AppState::new(config).await.expect("state"));
+    let app =
+        test::init_service(App::new().configure(|cfg| http::configure(cfg, state.clone()))).await;
+
+    let response = test::call_service(
+        &app,
+        TestRequest::put()
+            .uri("/api/autoinstall/ubuntu")
+            .insert_header(("content-type", "application/json"))
+            .set_payload(
+                serde_json::json!({
+                    "hostname": "-bad",
+                    "username": "BadUser",
+                    "password": "short",
+                    "locale": "",
+                    "keyboardLayout": "",
+                    "timezone": "",
+                    "storageLayout": "direct",
+                    "installOpenSsh": true,
+                    "allowPasswordAuth": true,
+                    "authorizedKeys": ["bad"],
+                    "packages": []
+                })
+                .to_string(),
+            )
+            .to_request(),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = to_bytes(response.into_body()).await.expect("body");
+    let payload = String::from_utf8(body.to_vec()).expect("utf8");
+    assert!(payload.contains("\"fieldErrors\""));
+    assert!(payload.contains("hostname"));
+    assert!(payload.contains("username"));
+    assert!(payload.contains("password"));
+}
+
+#[actix_web::test]
 async fn refresh_cache_skips_redownload_when_manifest_matches_seeded_assets() {
     let (_temp_dir, config) = test_config();
     seed_cache_manifest(&config, DistroId::Ubuntu).await;
@@ -157,5 +313,10 @@ async fn seed_cache_manifest(config: &Config, distro: DistroId) {
 fn sha256_hex(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
-    format!("{:x}", hasher.finalize())
+    hasher
+        .finalize()
+        .as_slice()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
