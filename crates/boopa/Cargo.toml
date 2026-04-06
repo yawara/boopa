@@ -6,8 +6,10 @@ license.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+async-tftp = "0.4"
 axum.workspace = true
 boot-recipe = { path = "../boot-recipe" }
+futures-lite = "2"
 image-cache = { path = "../image-cache" }
 serde.workspace = true
 serde_json.workspace = true

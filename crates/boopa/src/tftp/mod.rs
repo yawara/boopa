@@ -1,11 +1,16 @@
-use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    net::SocketAddr,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
-use tokio::{net::UdpSocket, time::timeout};
+use async_tftp::{
+    packet,
+    server::{Handler, TftpServer, TftpServerBuilder},
+};
+use futures_lite::io::{Cursor, Sink};
 
 use crate::app_state::AppState;
-
-const DEFAULT_BLOCK_SIZE: usize = 512;
-const MAX_BLOCK_SIZE: usize = 65464;
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct TftpResolution {
@@ -14,46 +19,14 @@ pub struct TftpResolution {
     pub generated: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ReadRequest {
-    filename: String,
-    options: RequestOptions,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-struct RequestOptions {
-    block_size: Option<usize>,
-    transfer_size: bool,
+#[derive(Clone)]
+struct BoopaTftpHandler {
+    state: Arc<AppState>,
 }
 
 pub async fn serve(state: Arc<AppState>) -> anyhow::Result<()> {
-    let socket = UdpSocket::bind(state.config().tftp_bind).await?;
-    let mut buffer = [0_u8; 1500];
-
-    loop {
-        let (bytes_read, peer) = socket.recv_from(&mut buffer).await?;
-        if let Some(request) = parse_rrq(&buffer[..bytes_read]) {
-            tracing::info!(%peer, requested_path = %request.filename, ?request.options, "tftp rrq");
-            if let Some(asset) = state.resolve_boot_asset(&request.filename).await {
-                // Keep DATA packets on the RRQ port so GRUB can complete transfers
-                // when booting through an explicitly configured non-default TFTP port.
-                match asset.read_bytes().await {
-                    Ok(bytes) => {
-                        if let Err(error) = send_file(&socket, peer, bytes, &request).await {
-                            tracing::warn!(?error, %peer, "tftp transfer failed");
-                        }
-                    }
-                    Err(error) => {
-                        tracing::warn!(?error, %peer, "tftp asset read failed");
-                        send_error(&socket, peer, 1, "file not found").await?;
-                    }
-                }
-            } else {
-                tracing::warn!(%peer, requested_path = %request.filename, "tftp file not found");
-                send_error(&socket, peer, 1, "file not found").await?;
-            }
-        }
-    }
+    build_server(state).await?.serve().await?;
+    Ok(())
 }
 
 pub async fn run_tftp_server(state: Arc<AppState>) -> anyhow::Result<()> {
@@ -75,172 +48,58 @@ pub fn resolve_path(root: &std::path::Path, relative_path: &str) -> PathBuf {
     root.join(relative_path.trim_start_matches('/'))
 }
 
-async fn send_file(
-    socket: &UdpSocket,
-    peer: SocketAddr,
-    bytes: Vec<u8>,
-    request: &ReadRequest,
-) -> anyhow::Result<()> {
-    let block_size = request
-        .options
-        .block_size
-        .map(|size| size.clamp(DEFAULT_BLOCK_SIZE, MAX_BLOCK_SIZE))
-        .unwrap_or(DEFAULT_BLOCK_SIZE);
-
-    if let Some(packet) = option_ack_packet(request, bytes.len(), block_size) {
-        send_with_retries(socket, peer, 0, packet, "option ack").await?;
-    }
-
-    let mut offset = 0usize;
-    let mut block = 1u16;
-
-    loop {
-        let end = bytes.len().min(offset + block_size);
-        let chunk = &bytes[offset..end];
-        let mut packet = Vec::with_capacity(chunk.len() + 4);
-        packet.extend_from_slice(&3_u16.to_be_bytes());
-        packet.extend_from_slice(&block.to_be_bytes());
-        packet.extend_from_slice(chunk);
-
-        send_with_retries(socket, peer, block, packet, "data block").await?;
-
-        if chunk.len() < block_size {
-            break;
-        }
-        offset += block_size;
-        block = block.wrapping_add(1);
-    }
-
-    Ok(())
+async fn build_server(state: Arc<AppState>) -> async_tftp::Result<TftpServer<BoopaTftpHandler>> {
+    TftpServerBuilder::with_handler(BoopaTftpHandler {
+        state: state.clone(),
+    })
+    .bind(state.config().tftp_bind)
+    .build()
+    .await
 }
 
-async fn send_with_retries(
-    socket: &UdpSocket,
-    peer: SocketAddr,
-    expected_ack: u16,
-    packet: Vec<u8>,
-    label: &str,
-) -> anyhow::Result<()> {
-    let mut retries = 0u8;
-
-    loop {
-        socket.send_to(&packet, peer).await?;
-
-        if wait_for_ack(socket, peer, expected_ack).await? {
-            return Ok(());
-        }
-
-        retries += 1;
-        if retries >= 3 {
-            anyhow::bail!("timed out waiting for ack for {} {}", label, expected_ack);
-        }
-    }
+fn normalize_request_path(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
 }
 
-async fn wait_for_ack(socket: &UdpSocket, peer: SocketAddr, block: u16) -> anyhow::Result<bool> {
-    let mut ack = [0_u8; 4];
-    loop {
-        let result = timeout(Duration::from_secs(3), socket.recv_from(&mut ack)).await;
-        let Ok(Ok((len, sender))) = result else {
-            return Ok(false);
+impl Handler for BoopaTftpHandler {
+    type Reader = Cursor<Vec<u8>>;
+    type Writer = Sink;
+
+    async fn read_req_open(
+        &mut self,
+        client: &SocketAddr,
+        path: &Path,
+    ) -> Result<(Self::Reader, Option<u64>), packet::Error> {
+        let requested_path = normalize_request_path(path);
+        tracing::info!(%client, requested_path = %requested_path, "tftp rrq");
+
+        let Some(asset) = self.state.resolve_boot_asset(&requested_path).await else {
+            tracing::warn!(%client, requested_path = %requested_path, "tftp file not found");
+            return Err(packet::Error::FileNotFound);
         };
 
-        if sender != peer || len != 4 {
-            continue;
-        }
+        let served_path = asset.logical_path().to_string();
+        let bytes = asset.read_bytes().await.map_err(|error| {
+            tracing::warn!(?error, %client, requested_path = %requested_path, served_path = %served_path, "tftp asset read failed");
+            packet::Error::FileNotFound
+        })?;
+        let size = bytes.len() as u64;
 
-        if parse_ack(&ack) == Some(block) {
-            return Ok(true);
-        }
-    }
-}
+        tracing::info!(%client, requested_path = %requested_path, served_path = %served_path, generated = asset.is_generated(), "tftp serving asset");
 
-async fn send_error(
-    socket: &UdpSocket,
-    peer: SocketAddr,
-    code: u16,
-    message: &str,
-) -> anyhow::Result<()> {
-    let mut packet = Vec::with_capacity(message.len() + 5);
-    packet.extend_from_slice(&5_u16.to_be_bytes());
-    packet.extend_from_slice(&code.to_be_bytes());
-    packet.extend_from_slice(message.as_bytes());
-    packet.push(0);
-    socket.send_to(&packet, peer).await?;
-    Ok(())
-}
-
-fn option_ack_packet(request: &ReadRequest, file_len: usize, block_size: usize) -> Option<Vec<u8>> {
-    let mut payload = Vec::new();
-
-    if request.options.block_size.is_some() {
-        payload.extend_from_slice(b"blksize");
-        payload.push(0);
-        payload.extend_from_slice(block_size.to_string().as_bytes());
-        payload.push(0);
+        Ok((Cursor::new(bytes), Some(size)))
     }
 
-    if request.options.transfer_size {
-        payload.extend_from_slice(b"tsize");
-        payload.push(0);
-        payload.extend_from_slice(file_len.to_string().as_bytes());
-        payload.push(0);
+    async fn write_req_open(
+        &mut self,
+        client: &SocketAddr,
+        path: &Path,
+        _size: Option<u64>,
+    ) -> Result<Self::Writer, packet::Error> {
+        let requested_path = normalize_request_path(path);
+        tracing::warn!(%client, requested_path = %requested_path, "tftp wrq rejected");
+        Err(packet::Error::IllegalOperation)
     }
-
-    if payload.is_empty() {
-        return None;
-    }
-
-    let mut packet = Vec::with_capacity(payload.len() + 2);
-    packet.extend_from_slice(&6_u16.to_be_bytes());
-    packet.extend_from_slice(&payload);
-    Some(packet)
-}
-
-fn parse_rrq(packet: &[u8]) -> Option<ReadRequest> {
-    if packet.len() < 4 || u16::from_be_bytes([packet[0], packet[1]]) != 1 {
-        return None;
-    }
-
-    let fields = packet[2..]
-        .split(|byte| *byte == 0)
-        .filter(|field| !field.is_empty())
-        .map(std::str::from_utf8)
-        .collect::<Result<Vec<_>, _>>()
-        .ok()?;
-
-    if fields.len() < 2 {
-        return None;
-    }
-
-    let mut options = RequestOptions::default();
-    for chunk in fields[2..].chunks_exact(2) {
-        let key = chunk[0].to_ascii_lowercase();
-        let value = chunk[1];
-        match key.as_str() {
-            "blksize" => {
-                let parsed = value.parse::<usize>().ok()?;
-                if (8..=MAX_BLOCK_SIZE).contains(&parsed) {
-                    options.block_size = Some(parsed);
-                }
-            }
-            "tsize" => options.transfer_size = true,
-            _ => {}
-        }
-    }
-
-    Some(ReadRequest {
-        filename: fields[0].to_string(),
-        options,
-    })
-}
-
-fn parse_ack(packet: &[u8]) -> Option<u16> {
-    if packet.len() != 4 || u16::from_be_bytes([packet[0], packet[1]]) != 4 {
-        return None;
-    }
-
-    Some(u16::from_be_bytes([packet[2], packet[3]]))
 }
 
 #[cfg(test)]
@@ -248,159 +107,175 @@ mod tests {
     use std::{
         net::{IpAddr, Ipv4Addr, SocketAddr},
         sync::Arc,
+        time::Duration,
     };
 
-    use tokio::{fs, net::UdpSocket};
+    use tokio::{fs, net::UdpSocket, task::JoinHandle, time::timeout};
 
-    #[test]
-    fn parses_rrq_packets() {
-        let packet = b"\x00\x01ubuntu/bios/kernel\x00octet\x00";
-        assert_eq!(
-            super::parse_rrq(packet).map(|request| request.filename),
-            Some("ubuntu/bios/kernel".to_string())
-        );
+    use crate::{app_state::AppState, config::Config};
+
+    fn rrq_packet(path: &str) -> Vec<u8> {
+        let mut packet = Vec::new();
+        packet.extend_from_slice(&1_u16.to_be_bytes());
+        packet.extend_from_slice(path.as_bytes());
+        packet.push(0);
+        packet.extend_from_slice(b"octet");
+        packet.push(0);
+        packet
     }
 
-    #[test]
-    fn parses_ack_packets() {
-        assert_eq!(super::parse_ack(b"\x00\x04\x00\x02"), Some(2));
-        assert_eq!(super::parse_ack(b"\x00\x03\x00\x02"), None);
+    async fn recv_packet(socket: &UdpSocket, buffer: &mut [u8]) -> (usize, SocketAddr) {
+        timeout(Duration::from_secs(3), socket.recv_from(buffer))
+            .await
+            .expect("packet timeout")
+            .expect("recv packet")
     }
 
-    #[test]
-    fn parses_rrq_options() {
-        let packet = b"\x00\x01/ubuntu/uefi/kernel\x00octet\x00blksize\x001468\x00tsize\x000\x00";
-        let request = super::parse_rrq(packet).expect("request");
-
-        assert_eq!(request.filename, "/ubuntu/uefi/kernel");
-        assert_eq!(request.options.block_size, Some(1468));
-        assert!(request.options.transfer_size);
-    }
-
-    #[tokio::test]
-    async fn sends_file_and_waits_for_acknowledgements() {
-        let tempdir = tempfile::tempdir().expect("tempdir");
-        let path = tempdir.path().join("kernel");
-        fs::write(&path, vec![b'a'; 700]).await.expect("seed file");
-
-        let server = Arc::new(
-            UdpSocket::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0))
-                .await
-                .expect("bind server"),
-        );
+    async fn fetch_tftp(addr: SocketAddr, path: &str) -> Result<Vec<u8>, u16> {
         let client = UdpSocket::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0))
             .await
             .expect("bind client");
-        let client_addr = client.local_addr().expect("client addr");
-        let server_addr = server.local_addr().expect("server addr");
+        client
+            .send_to(&rrq_packet(path), addr)
+            .await
+            .expect("send rrq");
 
-        let transfer = tokio::spawn({
-            let server = Arc::clone(&server);
-            async move {
-                super::send_file(
-                    server.as_ref(),
-                    client_addr,
-                    tokio::fs::read(path).await.expect("read file"),
-                    &super::ReadRequest {
-                        filename: "ubuntu/bios/kernel".to_string(),
-                        options: super::RequestOptions::default(),
-                    },
-                )
-                .await
+        let mut buffer = [0_u8; 2048];
+        let mut payload = Vec::new();
+        let mut transfer_addr = None;
+
+        loop {
+            let (len, sender) = recv_packet(&client, &mut buffer).await;
+            transfer_addr.get_or_insert(sender);
+
+            match u16::from_be_bytes([buffer[0], buffer[1]]) {
+                3 => {
+                    let block = u16::from_be_bytes([buffer[2], buffer[3]]);
+                    payload.extend_from_slice(&buffer[4..len]);
+
+                    let mut ack = [0_u8; 4];
+                    ack[..2].copy_from_slice(&4_u16.to_be_bytes());
+                    ack[2..].copy_from_slice(&block.to_be_bytes());
+                    client
+                        .send_to(&ack, transfer_addr.expect("transfer addr"))
+                        .await
+                        .expect("send ack");
+
+                    if len < 516 {
+                        return Ok(payload);
+                    }
+                }
+                5 => {
+                    let code = u16::from_be_bytes([buffer[2], buffer[3]]);
+                    return Err(code);
+                }
+                opcode => panic!("unexpected opcode {opcode}"),
             }
+        }
+    }
+
+    async fn seed_asset(tempdir: &tempfile::TempDir, relative_path: &str, bytes: &[u8]) {
+        let path = tempdir.path().join("data/cache").join(relative_path);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).await.expect("cache dir");
+        }
+        fs::write(path, bytes).await.expect("seed asset");
+    }
+
+    async fn spawn_test_server(
+        tempdir: &tempfile::TempDir,
+        selected_distro: Option<boot_recipe::DistroId>,
+    ) -> (Arc<AppState>, SocketAddr, JoinHandle<()>) {
+        let listener =
+            std::net::UdpSocket::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0))
+                .expect("reserve udp port");
+        let tftp_bind = listener.local_addr().expect("reserved addr");
+        drop(listener);
+
+        fs::create_dir_all(tempdir.path().join("frontend"))
+            .await
+            .expect("frontend dir");
+
+        let state = Arc::new(
+            AppState::new(Config {
+                api_bind: ([127, 0, 0, 1], 0).into(),
+                tftp_bind,
+                tftp_advertise_addr: ([10, 0, 2, 2], 16969).into(),
+                data_dir: tempdir.path().join("data"),
+                frontend_dir: tempdir.path().join("frontend"),
+            })
+            .await
+            .expect("state"),
+        );
+
+        if let Some(distro) = selected_distro {
+            state.set_selected_distro(distro).await.expect("set distro");
+        }
+
+        let server = super::build_server(state.clone())
+            .await
+            .expect("build server");
+        let listen_addr = server.listen_addr().expect("listen addr");
+        let handle = tokio::spawn(async move {
+            server.serve().await.expect("serve");
         });
 
-        let mut buffer = [0_u8; 516];
-        let (len1, packet1_addr) = client.recv_from(&mut buffer).await.expect("data packet 1");
-        assert_eq!(&buffer[..4], b"\x00\x03\x00\x01");
-        assert_eq!(len1, 516);
-        assert_eq!(packet1_addr, server_addr);
-        client
-            .send_to(b"\x00\x04\x00\x01", server_addr)
-            .await
-            .expect("ack block 1");
-
-        let (len2, packet2_addr) = client.recv_from(&mut buffer).await.expect("data packet 2");
-        assert_eq!(packet2_addr, server_addr);
-        assert_eq!(&buffer[..4], b"\x00\x03\x00\x02");
-        assert_eq!(len2, 192);
-        client
-            .send_to(b"\x00\x04\x00\x02", packet2_addr)
-            .await
-            .expect("ack block 2");
-
-        transfer.await.expect("join").expect("transfer ok");
+        (state, listen_addr, handle)
     }
 
     #[tokio::test]
-    async fn negotiates_rrq_options_before_streaming_data() {
+    async fn serves_cached_asset_over_tftp() {
         let tempdir = tempfile::tempdir().expect("tempdir");
-        let path = tempdir.path().join("kernel");
-        fs::write(&path, vec![b'a'; 2_000])
+        seed_asset(&tempdir, "ubuntu/bios/kernel", b"kernel-bytes").await;
+        let (_state, addr, handle) = spawn_test_server(&tempdir, None).await;
+
+        let payload = fetch_tftp(addr, "ubuntu/bios/kernel")
             .await
-            .expect("seed file");
+            .expect("tftp payload");
+        handle.abort();
 
-        let server = Arc::new(
-            UdpSocket::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0))
-                .await
-                .expect("bind server"),
-        );
-        let client = UdpSocket::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0))
+        assert_eq!(payload, b"kernel-bytes");
+    }
+
+    #[tokio::test]
+    async fn serves_generated_grub_config_over_tftp() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let (_state, addr, handle) = spawn_test_server(&tempdir, None).await;
+
+        let payload = fetch_tftp(addr, "grub/grub.cfg")
             .await
-            .expect("bind client");
-        let client_addr = client.local_addr().expect("client addr");
-        let server_addr = server.local_addr().expect("server addr");
+            .expect("tftp payload");
+        handle.abort();
 
-        let transfer = tokio::spawn({
-            let server = Arc::clone(&server);
-            async move {
-                super::send_file(
-                    server.as_ref(),
-                    client_addr,
-                    tokio::fs::read(path).await.expect("read file"),
-                    &super::ReadRequest {
-                        filename: "/ubuntu/uefi/kernel".to_string(),
-                        options: super::RequestOptions {
-                            block_size: Some(1468),
-                            transfer_size: true,
-                        },
-                    },
-                )
-                .await
-            }
-        });
+        let payload = String::from_utf8(payload).expect("utf8");
+        assert!(payload.contains("root=(tftp,10.0.2.2:16969)"));
+        assert!(payload.contains("linux /ubuntu/uefi/kernel"));
+    }
 
-        let mut buffer = [0_u8; 1600];
-        let (oack_len, oack_addr) = client.recv_from(&mut buffer).await.expect("oack packet");
-        assert_eq!(oack_addr, server_addr);
-        assert_eq!(&buffer[..2], b"\x00\x06");
-        let payload = &buffer[2..oack_len];
-        assert!(payload.starts_with(b"blksize\x001468\x00"));
-        assert!(payload.ends_with(b"tsize\x002000\x00"));
+    #[tokio::test]
+    async fn returns_file_not_found_for_missing_asset() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let (_state, addr, handle) = spawn_test_server(&tempdir, None).await;
 
-        client
-            .send_to(b"\x00\x04\x00\x00", server_addr)
+        let error = fetch_tftp(addr, "ubuntu/bios/missing")
             .await
-            .expect("ack oack");
+            .expect_err("expected tftp error");
+        handle.abort();
 
-        let (len1, packet1_addr) = client.recv_from(&mut buffer).await.expect("data packet 1");
-        assert_eq!(packet1_addr, server_addr);
-        assert_eq!(&buffer[..4], b"\x00\x03\x00\x01");
-        assert_eq!(len1, 1472);
-        client
-            .send_to(b"\x00\x04\x00\x01", server_addr)
+        assert_eq!(error, 1);
+    }
+
+    #[tokio::test]
+    async fn suppresses_ubuntu_only_generated_assets_for_non_ubuntu_selection() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let (_state, addr, handle) =
+            spawn_test_server(&tempdir, Some(boot_recipe::DistroId::Fedora)).await;
+
+        let error = fetch_tftp(addr, "grub/grub.cfg")
             .await
-            .expect("ack block 1");
+            .expect_err("expected tftp error");
+        handle.abort();
 
-        let (len2, packet2_addr) = client.recv_from(&mut buffer).await.expect("data packet 2");
-        assert_eq!(packet2_addr, server_addr);
-        assert_eq!(&buffer[..4], b"\x00\x03\x00\x02");
-        assert_eq!(len2, 536);
-        client
-            .send_to(b"\x00\x04\x00\x02", packet2_addr)
-            .await
-            .expect("ack block 2");
-
-        transfer.await.expect("join").expect("transfer ok");
+        assert_eq!(error, 1);
     }
 }
