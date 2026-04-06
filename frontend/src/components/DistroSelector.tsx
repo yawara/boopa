@@ -1,3 +1,11 @@
+import {
+  NativeSelect,
+  Paper,
+  Stack,
+  Text,
+  Title,
+} from "@mantine/core";
+
 import type { DistroId, DistroSummary } from "../services/api";
 
 interface DistroSelectorProps {
@@ -14,30 +22,32 @@ export function DistroSelector({
   onChange,
 }: DistroSelectorProps) {
   return (
-    <section className="card">
-      <div className="card-header">
-        <p className="eyebrow">Active Distribution</p>
-        <h2>Choose what the LAN boots next</h2>
-      </div>
-      <label className="field">
-        <span>Distro</span>
-        <select
+    <Paper component="section" p="xl">
+      <Stack gap="md">
+        <div>
+          <Text c="boopaAccent.7" fw={700} fz="xs" lts="0.16em" mb={6} tt="uppercase">
+            Active Distribution
+          </Text>
+          <Title order={2} size="h3">
+            Choose what the LAN boots next
+          </Title>
+        </div>
+        <NativeSelect
           aria-label="Distro"
+          data={distros.map((distro) => ({
+            value: distro.id,
+            label: distro.label,
+          }))}
+          label="Distro"
           value={current}
           disabled={isSaving}
           onChange={(event) => onChange(event.target.value as DistroId)}
-        >
-          {distros.map((distro) => (
-            <option key={distro.id} value={distro.id}>
-              {distro.label}
-            </option>
-          ))}
-        </select>
-      </label>
-      <p className="subtle">
-        The selected distro is persisted by the backend and controls both DHCP guidance and
-        boot asset refreshes.
-      </p>
-    </section>
+        />
+        <Text c="slate.7">
+          The selected distro is persisted by the backend and controls both DHCP guidance and boot
+          asset refreshes.
+        </Text>
+      </Stack>
+    </Paper>
   );
 }

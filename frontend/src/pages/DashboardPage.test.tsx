@@ -1,7 +1,7 @@
-import { Provider } from "react-redux";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
+import { AppProviders } from "../app/AppProviders";
 import { createTestStore } from "../app/store";
 import { DashboardPage } from "./DashboardPage";
 
@@ -99,13 +99,15 @@ describe("DashboardPage", () => {
     const fetchMock = mockApi();
     const store = createTestStore();
     render(
-      <Provider store={store}>
+      <AppProviders store={store}>
         <DashboardPage />
-      </Provider>,
+      </AppProviders>,
     );
 
     expect(await screen.findByText("boopa")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "boopa logo" })).toBeInTheDocument();
     expect(await screen.findByText("Asset readiness for ubuntu")).toBeInTheDocument();
+    expect(await screen.findByText("Manual settings for ubuntu")).toBeInTheDocument();
 
     await userEvent.selectOptions(screen.getByLabelText("Distro"), "fedora");
 
@@ -115,5 +117,25 @@ describe("DashboardPage", () => {
         return request.method === "PUT" && request.url.endsWith("/api/selection");
       })).toBe(true);
     });
+  });
+
+  it("shows the hero immediately while the dashboard data is still loading", () => {
+    const pendingFetch = vi.fn(
+      () =>
+        new Promise<Response>(() => {
+          // Leave the request pending to keep the page in its initial loading state.
+        }),
+    );
+
+    vi.stubGlobal("fetch", pendingFetch);
+
+    render(
+      <AppProviders store={createTestStore()}>
+        <DashboardPage />
+      </AppProviders>,
+    );
+
+    expect(screen.getByRole("img", { name: "boopa logo" })).toBeInTheDocument();
+    expect(screen.getByText("Loading dashboard...")).toBeInTheDocument();
   });
 });
