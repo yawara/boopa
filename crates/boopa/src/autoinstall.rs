@@ -472,8 +472,11 @@ pub fn mask_password_presence(password_hash: &str) -> bool {
 }
 
 pub fn fingerprint_password_hash(password_hash: &str) -> String {
-    let digest = Sha256::digest(password_hash.as_bytes());
-    format!("{digest:x}")
+    Sha256::digest(password_hash.as_bytes())
+        .as_slice()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 #[cfg(test)]
