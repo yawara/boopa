@@ -122,6 +122,11 @@ pub fn get_recipe(distro: DistroId, mode: BootMode) -> Result<RecipeOutput, Reci
                     "ubuntu/uefi/initrd",
                     "https://releases.ubuntu.com/24.04/netboot/amd64/initrd",
                 ),
+                asset(
+                    "iso",
+                    "ubuntu/uefi/live-server.iso",
+                    "https://releases.ubuntu.com/24.04/ubuntu-24.04.4-live-server-amd64.iso",
+                ),
             ],
         ),
         (DistroId::Fedora, BootMode::Bios) => recipe(

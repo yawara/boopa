@@ -1,4 +1,5 @@
 use std::{
+    fmt,
     net::SocketAddr,
     path::{Path, PathBuf},
 };
@@ -26,6 +27,21 @@ pub enum ResolvedBootAsset {
         bytes: Vec<u8>,
         content_type: &'static str,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BootAssetTransport {
+    Http,
+    Tftp,
+}
+
+impl fmt::Display for BootAssetTransport {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::Http => "http",
+            Self::Tftp => "tftp",
+        })
+    }
 }
 
 impl ResolvedBootAsset {
@@ -62,10 +78,14 @@ pub fn resolve_asset(
     distro: DistroId,
     requested_path: &str,
     tftp_endpoint: SocketAddr,
+    guest_http_base_url: &str,
+    transport: BootAssetTransport,
 ) -> Option<ResolvedBootAsset> {
     let normalized = requested_path.trim_start_matches('/');
 
-    if let Some(asset) = resolve_generated_asset(distro, normalized, tftp_endpoint) {
+    if let Some(asset) =
+        resolve_generated_asset(distro, normalized, tftp_endpoint, guest_http_base_url)
+    {
         return Some(asset);
     }
 
@@ -74,7 +94,7 @@ pub fn resolve_asset(
         .filter_map(|mode| get_recipe(distro, mode).ok())
         .flat_map(|recipe| recipe.assets.into_iter())
         .find_map(|asset| {
-            if asset.relative_path == normalized {
+            if asset.relative_path == normalized && asset_is_available_over(transport, normalized) {
                 Some(ResolvedBootAsset::CachedFile {
                     logical_path: asset.relative_path,
                     local_path: cache_root.join(normalized),
@@ -90,11 +110,12 @@ fn resolve_generated_asset(
     distro: DistroId,
     normalized: &str,
     tftp_endpoint: SocketAddr,
+    guest_http_base_url: &str,
 ) -> Option<ResolvedBootAsset> {
     if distro == DistroId::Ubuntu && UBUNTU_UEFI_GRUB_CFG_ALIASES.contains(&normalized) {
         return Some(ResolvedBootAsset::Generated {
             logical_path: "ubuntu/uefi/grub.cfg".to_string(),
-            bytes: render_ubuntu_uefi_grub_cfg(tftp_endpoint).into_bytes(),
+            bytes: render_ubuntu_uefi_grub_cfg(tftp_endpoint, guest_http_base_url).into_bytes(),
             content_type: GRUB_CFG_CONTENT_TYPE,
         });
     }
@@ -102,9 +123,16 @@ fn resolve_generated_asset(
     None
 }
 
-fn render_ubuntu_uefi_grub_cfg(tftp_endpoint: SocketAddr) -> String {
+fn asset_is_available_over(transport: BootAssetTransport, path: &str) -> bool {
+    !matches!(
+        (transport, path),
+        (BootAssetTransport::Tftp, "ubuntu/uefi/live-server.iso")
+    )
+}
+
+fn render_ubuntu_uefi_grub_cfg(tftp_endpoint: SocketAddr, guest_http_base_url: &str) -> String {
     format!(
-        "set default=0\nset timeout=2\nset pager=1\n\ninsmod efinet\ninsmod net\ninsmod tftp\nnet_bootp\nset root=(tftp,{tftp_endpoint})\n\nmenuentry \"boopa ubuntu uefi smoke\" {{\n    echo \"Booting Ubuntu UEFI installer through boopa TFTP\"\n    linux /ubuntu/uefi/kernel ip=dhcp console=ttyS0,115200n8 ---\n    initrd /ubuntu/uefi/initrd\n    boot\n}}\n"
+        "set default=0\nset timeout=2\nset pager=1\n\ninsmod efinet\ninsmod net\ninsmod tftp\nnet_bootp\nset root=(tftp,{tftp_endpoint})\n\nmenuentry \"boopa ubuntu uefi smoke\" {{\n    echo \"Booting Ubuntu UEFI installer through boopa TFTP\"\n    linux /ubuntu/uefi/kernel ip=dhcp boot=casper iso-url={guest_http_base_url}/boot/ubuntu/uefi/live-server.iso console=ttyS0,115200n8 ---\n    initrd /ubuntu/uefi/initrd\n    boot\n}}\n"
     )
 }
 
@@ -117,7 +145,7 @@ mod tests {
 
     use boot_recipe::DistroId;
 
-    use super::{ResolvedBootAsset, resolve_asset};
+    use super::{BootAssetTransport, ResolvedBootAsset, resolve_asset};
 
     #[test]
     fn resolves_known_asset_path() {
@@ -126,6 +154,8 @@ mod tests {
             DistroId::Ubuntu,
             "ubuntu/bios/kernel",
             SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 6969),
+            "http://127.0.0.1:8080",
+            BootAssetTransport::Http,
         );
         assert_eq!(
             resolved,
@@ -148,7 +178,16 @@ mod tests {
             "boot/grub/grub.cfg",
         ]
         .into_iter()
-        .map(|path| resolve_asset(Path::new("/tmp/cache"), DistroId::Ubuntu, path, endpoint))
+        .map(|path| {
+            resolve_asset(
+                Path::new("/tmp/cache"),
+                DistroId::Ubuntu,
+                path,
+                endpoint,
+                "http://10.0.2.2:18080",
+                BootAssetTransport::Tftp,
+            )
+        })
         .collect::<Option<Vec<_>>>()
         .expect("all aliases resolve");
 
@@ -162,6 +201,34 @@ mod tests {
         }
         let payload = String::from_utf8(first).expect("utf8");
         assert!(payload.contains("root=(tftp,10.0.2.2:16969)"));
+        assert!(payload.contains("boot=casper"));
+        assert!(payload.contains("iso-url=http://10.0.2.2:18080/boot/ubuntu/uefi/live-server.iso"));
+    }
+
+    #[test]
+    fn ubuntu_uefi_live_server_iso_is_http_only() {
+        let http_resolved = resolve_asset(
+            Path::new("/tmp/cache"),
+            DistroId::Ubuntu,
+            "ubuntu/uefi/live-server.iso",
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(10, 0, 2, 2)), 16969),
+            "http://10.0.2.2:18080",
+            BootAssetTransport::Http,
+        );
+        assert!(matches!(
+            http_resolved,
+            Some(ResolvedBootAsset::CachedFile { .. })
+        ));
+
+        let tftp_resolved = resolve_asset(
+            Path::new("/tmp/cache"),
+            DistroId::Ubuntu,
+            "ubuntu/uefi/live-server.iso",
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(10, 0, 2, 2)), 16969),
+            "http://10.0.2.2:18080",
+            BootAssetTransport::Tftp,
+        );
+        assert!(tftp_resolved.is_none());
     }
 
     #[test]
@@ -171,6 +238,8 @@ mod tests {
             DistroId::Fedora,
             "ubuntu/uefi/grub.cfg",
             SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 6969),
+            "http://127.0.0.1:8080",
+            BootAssetTransport::Http,
         );
         assert!(resolved.is_none());
     }

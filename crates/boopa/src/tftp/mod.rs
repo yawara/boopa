@@ -10,7 +10,7 @@ use async_tftp::{
 };
 use futures_lite::io::{Cursor, Sink};
 
-use crate::app_state::AppState;
+use crate::{app_state::AppState, boot_assets::BootAssetTransport};
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct TftpResolution {
@@ -35,7 +35,7 @@ pub async fn run_tftp_server(state: Arc<AppState>) -> anyhow::Result<()> {
 
 pub async fn resolve_request(state: Arc<AppState>, requested_path: &str) -> Option<TftpResolution> {
     state
-        .resolve_boot_asset(requested_path)
+        .resolve_boot_asset(requested_path, BootAssetTransport::Tftp)
         .await
         .map(|asset| TftpResolution {
             requested_path: requested_path.to_string(),
@@ -73,7 +73,11 @@ impl Handler for BoopaTftpHandler {
         let requested_path = normalize_request_path(path);
         tracing::info!(%client, requested_path = %requested_path, "tftp rrq");
 
-        let Some(asset) = self.state.resolve_boot_asset(&requested_path).await else {
+        let Some(asset) = self
+            .state
+            .resolve_boot_asset(&requested_path, BootAssetTransport::Tftp)
+            .await
+        else {
             tracing::warn!(%client, requested_path = %requested_path, "tftp file not found");
             return Err(packet::Error::FileNotFound);
         };

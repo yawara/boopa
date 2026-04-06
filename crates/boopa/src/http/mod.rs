@@ -5,10 +5,14 @@ use std::path::{Component, Path, PathBuf};
 use actix_files::NamedFile;
 use actix_web::{
     HttpRequest, HttpResponse,
+    mime::APPLICATION_OCTET_STREAM,
     web::{self, Data, ServiceConfig},
 };
 
-use crate::app_state::AppState;
+use crate::{
+    app_state::AppState,
+    boot_assets::{BootAssetTransport, ResolvedBootAsset},
+};
 
 pub mod routes;
 
@@ -49,17 +53,30 @@ async fn index_fallback() -> HttpResponse {
         .body(INDEX_FALLBACK_HTML)
 }
 
-async fn get_boot_asset(state: Data<Arc<AppState>>, path: web::Path<String>) -> HttpResponse {
+async fn get_boot_asset(
+    request: HttpRequest,
+    state: Data<Arc<AppState>>,
+    path: web::Path<String>,
+) -> actix_web::Result<HttpResponse> {
     let path = path.into_inner();
 
-    match state.resolve_boot_asset(&path).await {
+    match state
+        .resolve_boot_asset(&path, BootAssetTransport::Http)
+        .await
+    {
+        Some(ResolvedBootAsset::CachedFile { local_path, .. }) => {
+            let file = NamedFile::open_async(local_path)
+                .await?
+                .set_content_type(APPLICATION_OCTET_STREAM);
+            Ok(file.into_response(&request))
+        }
         Some(asset) => match asset.read_bytes().await {
-            Ok(bytes) => HttpResponse::Ok()
+            Ok(bytes) => Ok(HttpResponse::Ok()
                 .content_type(asset.content_type())
-                .body(bytes),
-            Err(_) => HttpResponse::NotFound().finish(),
+                .body(bytes)),
+            Err(_) => Ok(HttpResponse::NotFound().finish()),
         },
-        None => HttpResponse::NotFound().finish(),
+        None => Ok(HttpResponse::NotFound().finish()),
     }
 }
 

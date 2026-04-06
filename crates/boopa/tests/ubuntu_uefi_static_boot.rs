@@ -25,6 +25,7 @@ async fn seed_ubuntu_uefi_assets(temp_dir: &TempDir) -> Vec<(&'static str, &'sta
         ("ubuntu/uefi/grubx64.efi", b"grubx64-efi-bytes".as_slice()),
         ("ubuntu/uefi/kernel", b"kernel-bytes".as_slice()),
         ("ubuntu/uefi/initrd", b"initrd-bytes".as_slice()),
+        ("ubuntu/uefi/live-server.iso", b"iso-bytes".as_slice()),
     ];
 
     for (relative_path, bytes) in &assets {
@@ -99,6 +100,9 @@ async fn tftp_resolves_seeded_ubuntu_uefi_static_assets() {
     let state = build_state(&temp_dir).await;
 
     for (relative_path, _) in assets {
+        if relative_path == "ubuntu/uefi/live-server.iso" {
+            continue;
+        }
         let resolution = resolve_request(state.clone(), relative_path).await;
         let resolution = resolution.expect("resolution");
         assert_eq!(resolution.requested_path, relative_path);
@@ -118,5 +122,15 @@ async fn tftp_rejects_ubuntu_uefi_assets_when_selected_distro_changes() {
         .expect("set selected distro");
 
     let resolution = resolve_request(state, "ubuntu/uefi/kernel").await;
+    assert!(resolution.is_none());
+}
+
+#[tokio::test]
+async fn tftp_does_not_resolve_ubuntu_live_server_iso() {
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    seed_ubuntu_uefi_assets(&temp_dir).await;
+    let state = build_state(&temp_dir).await;
+
+    let resolution = resolve_request(state, "ubuntu/uefi/live-server.iso").await;
     assert!(resolution.is_none());
 }

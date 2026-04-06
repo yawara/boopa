@@ -48,6 +48,14 @@ Out of scope in v1:
 - `GET /api/cache`
 - `POST /api/cache/refresh`
 
+Cache refresh behavior:
+
+- Cache refresh is manual only; assets are refreshed when `POST /api/cache/refresh` is called.
+- `boopa` persists asset hashes in `BOOPA_DATA_DIR/cache/manifest.json`.
+- If a recipe asset file already exists and its stored SHA-256 plus `source_url` still match, refresh skips re-downloading that asset.
+- If the file is missing, the hash differs, or the recipe `source_url` changed, refresh downloads the asset again and updates the manifest.
+- `force` refresh is not implemented yet.
+
 ## Verification
 
 Backend:
@@ -89,10 +97,13 @@ Current scope of the concrete harness:
 - `scripts/smoke/boot-ubuntu-uefi.sh` is the only implemented target today.
 - Other smoke entrypoints fail fast with a clear "not implemented" message.
 - The harness starts `boopa`, refreshes the Ubuntu cache through `POST /api/cache/refresh`, and treats `boopa` as the only source of Ubuntu UEFI boot assets.
+- During smoke runs, `BOOPA_DATA_DIR/cache` is symlinked to `var/boopa/cache` (or `SMOKE_SOURCE_DATA_DIR/cache`) so cached assets and `manifest.json` are reused across runs.
 - If a temporary FAT boot volume is needed for the first-stage firmware handoff, it is limited to firmware-carrier files plus `boopa`-served copies of the bootloader and GRUB config.
-- `boopa` now generates and serves the Ubuntu UEFI `grub.cfg`, while kernel and initrd are fetched from `boopa` over TFTP as `ubuntu/uefi/kernel` and `ubuntu/uefi/initrd`.
+- `boopa` now generates and serves the Ubuntu UEFI `grub.cfg`; kernel and initrd are fetched from `boopa` over TFTP as `ubuntu/uefi/kernel` and `ubuntu/uefi/initrd`, while the generated `iso-url` points clients at `/boot/ubuntu/uefi/live-server.iso` over HTTP.
+- Ubuntu UEFI clients must reach both the advertised TFTP endpoint and `http://<boopa-host>:<api-port>/boot/ubuntu/uefi/live-server.iso`.
+- The Ubuntu UEFI smoke path defaults to `RAM_MB=8192` and provisions a `SYSTEM_DISK_GB=32` qcow2 installer disk because the live installer downloads a multi-gigabyte ISO before pivoting to the live filesystem.
 - The smoke harness picks random high unprivileged API/TFTP ports by default to avoid local port collisions.
-- When launched from an interactive terminal, the harness attaches QEMU serial I/O to that terminal so prompts like `Press any key to continue...` accept input directly. Set `SMOKE_INTERACTIVE=0` to force headless mode.
+- When launched from an interactive terminal, the harness attaches QEMU serial I/O to that terminal and enables a QEMU display window by default so VGA/installer output is visible. Set `SMOKE_INTERACTIVE=0` to force headless mode, or override the interactive display backend with `SMOKE_QEMU_DISPLAY` if `default` is not suitable on your host.
 - Success is log-based: ideal markers indicate installer/live progress, fallback markers indicate kernel/initrd handoff and boot continuation.
 
 Typical local smoke verification:

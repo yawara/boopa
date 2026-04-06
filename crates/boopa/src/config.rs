@@ -41,6 +41,21 @@ impl Config {
     pub fn state_path(&self) -> PathBuf {
         self.data_dir.join("selection.json")
     }
+
+    pub fn guest_http_base_url(&self) -> String {
+        format!(
+            "http://{}:{}",
+            self.tftp_advertise_addr.ip(),
+            self.api_bind.port()
+        )
+    }
+
+    pub fn ubuntu_uefi_iso_url(&self) -> String {
+        format!(
+            "{}/boot/ubuntu/uefi/live-server.iso",
+            self.guest_http_base_url()
+        )
+    }
 }
 
 fn env_var(name: &str) -> Result<String, std::env::VarError> {
