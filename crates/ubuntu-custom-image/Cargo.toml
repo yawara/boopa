@@ -1,26 +1,19 @@
 [package]
-name = "boopa"
+name = "ubuntu-custom-image"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
-actix-files.workspace = true
-actix-web.workspace = true
 anyhow.workspace = true
-async-tftp = "0.4"
-boot-recipe = { path = "../boot-recipe" }
-futures-lite = "2"
-image-cache = { path = "../image-cache" }
+boot-recipe.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true
 sha2.workspace = true
-tokio.workspace = true
+tempfile.workspace = true
 tracing.workspace = true
-tracing-subscriber.workspace = true
 ubuntu-autoinstall.workspace = true
 
 [dev-dependencies]
-sha2.workspace = true
 tempfile.workspace = true

@@ -417,6 +417,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "ubuntu-autoinstall",
 ]
 
 [[package]]
@@ -2421,6 +2422,31 @@ name = "typenum"
 version = "1.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "562d481066bde0658276a35467c4af00bdc6ee726305698a55b86e61d7ad82bb"
+
+[[package]]
+name = "ubuntu-autoinstall"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_yaml",
+ "sha2",
+]
+
+[[package]]
+name = "ubuntu-custom-image"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "boot-recipe",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha2",
+ "tempfile",
+ "tracing",
+ "ubuntu-autoinstall",
+]
 
 [[package]]
 name = "unicase"

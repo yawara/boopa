@@ -2,6 +2,8 @@
 members = [
     "crates/boot-recipe",
     "crates/image-cache",
+    "crates/ubuntu-autoinstall",
+    "crates/ubuntu-custom-image",
     "crates/boopa",
 ]
 resolver = "2"
@@ -28,3 +30,4 @@ thiserror = "2.0"
 tokio = { version = "1.44", features = ["macros", "rt-multi-thread", "net", "fs", "io-util", "process", "signal", "sync", "time"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+ubuntu-autoinstall = { path = "crates/ubuntu-autoinstall" }

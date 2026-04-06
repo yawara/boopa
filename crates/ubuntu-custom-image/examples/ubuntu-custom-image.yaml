@@ -1,0 +1,33 @@
+packages:
+  - openssh-server
+  - git
+  - podman
+  - htop
+
+files:
+  - source: files/motd.txt
+    target: /usr/local/share/boopa/motd.txt
+    tree: rootfs
+    mode: "0644"
+
+config:
+  - target: /etc/boopa/custom-image.conf
+    tree: rootfs
+    mode: "0644"
+    content: |
+      mirror=http://archive.ubuntu.com/ubuntu
+
+autoinstall:
+  seed_dir: /autoinstall
+  hostname: boopa-custom
+  username: ubuntu
+  passwordHash: "$1$DYoAfNpV$3G/NIgG/dz0XHgRX0/.MN."
+  locale: en_US.UTF-8
+  keyboardLayout: us
+  timezone: UTC
+  storageLayout: direct
+  installOpenSsh: true
+  allowPasswordAuth: true
+  authorizedKeys: []
+  packages:
+    - openssh-server
