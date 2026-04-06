@@ -7,6 +7,17 @@ use crate::{
     autoinstall::{UbuntuAutoinstallConfigUpdate, UpdateError, ValidationErrorResponse},
 };
 
+pub fn configure(cfg: &mut web::ServiceConfig) {
+    cfg.route(
+        "/api/autoinstall/ubuntu",
+        web::get().to(get_ubuntu_autoinstall),
+    )
+    .route(
+        "/api/autoinstall/ubuntu",
+        web::put().to(put_ubuntu_autoinstall),
+    );
+}
+
 pub async fn get_ubuntu_autoinstall(state: web::Data<Arc<AppState>>) -> HttpResponse {
     match state.ubuntu_autoinstall_config().await {
         Ok(response) => HttpResponse::Ok().json(response),

@@ -11,6 +11,11 @@ pub struct RefreshRequest {
     pub distro: Option<DistroId>,
 }
 
+pub fn configure(cfg: &mut web::ServiceConfig) {
+    cfg.route("/api/cache", web::get().to(get_cache_status))
+        .route("/api/cache/refresh", web::post().to(refresh_cache));
+}
+
 pub async fn get_cache_status(state: web::Data<Arc<AppState>>) -> HttpResponse {
     match state.cache_status().await {
         Ok(response) => HttpResponse::Ok().json(response),

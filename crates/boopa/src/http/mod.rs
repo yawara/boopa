@@ -29,28 +29,9 @@ const INDEX_FALLBACK_HTML: &str = r#"<!doctype html>
 </html>"#;
 
 pub fn configure(cfg: &mut ServiceConfig, state: Arc<AppState>) {
-    cfg.app_data(Data::new(state))
-        .route("/api/health", web::get().to(routes::health::get_health))
-        .route("/api/distros", web::get().to(routes::distros::get_distros))
-        .route("/api/dhcp", web::get().to(routes::dhcp::get_dhcp))
-        .route("/api/cache", web::get().to(routes::cache::get_cache_status))
-        .route(
-            "/api/autoinstall/ubuntu",
-            web::get().to(routes::autoinstall::get_ubuntu_autoinstall),
-        )
-        .route(
-            "/api/autoinstall/ubuntu",
-            web::put().to(routes::autoinstall::put_ubuntu_autoinstall),
-        )
-        .route(
-            "/api/selection",
-            web::put().to(routes::distros::put_selection),
-        )
-        .route(
-            "/api/cache/refresh",
-            web::post().to(routes::cache::refresh_cache),
-        )
-        .route("/boot/{path:.*}", web::get().to(get_boot_asset))
+    cfg.app_data(Data::new(state));
+    routes::configure(cfg);
+    cfg.route("/boot/{path:.*}", web::get().to(get_boot_asset))
         .route("/", web::get().to(get_frontend_asset))
         .route("/{path:.*}", web::get().to(get_frontend_asset));
 }
