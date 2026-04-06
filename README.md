@@ -76,12 +76,32 @@ Frontend:
 - `npm test --prefix frontend`
 - `npm run typecheck --prefix frontend`
 - `npm run build --prefix frontend`
+- `npx --prefix frontend playwright install chromium`
+- `npm run test:e2e --prefix frontend`
 
 Frontend dev proxy:
 
 - The frontend npm package and lockfile both live under `frontend/`.
 - `npm run dev --prefix frontend` proxies `/api` and `/boot` to `http://127.0.0.1:8080`
 - Override the dev backend target with `BOOPA_DEV_BACKEND=http://host:port npm run dev --prefix frontend`
+
+Frontend e2e:
+
+- `frontend/playwright.config.ts` starts a real `boopa` backend plus a Vite dev server for browser tests.
+- The browser lane uses an isolated `BOOPA_DATA_DIR` under the OS temp directory and never reuses the default `var/boopa`.
+- First-wave browser coverage is intentionally narrow:
+  - dashboard initial render against the live backend
+  - Ubuntu autoinstall edit/save
+  - persistence across reload for the saved autoinstall state
+- First-wave browser coverage intentionally excludes distro-switch e2e.
+- First-wave browser coverage does not validate backend-served static assets in-browser; it exercises the Vite dev server plus live backend path.
+
+Typical local frontend e2e verification:
+
+```sh
+npx --prefix frontend playwright install chromium
+npm run test:e2e --prefix frontend
+```
 
 Smoke scripts:
 
