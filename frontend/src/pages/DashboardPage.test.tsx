@@ -58,6 +58,19 @@ function mockApi(options?: { selected?: "ubuntu" | "fedora" | "arch" }) {
       return new Response(
         JSON.stringify({
           selected,
+          runtime: {
+            enabled: false,
+            mode: "disabled",
+            bindAddress: "0.0.0.0:67",
+            subnet: null,
+            poolStart: null,
+            poolEnd: null,
+            router: null,
+            dnsServers: [],
+            leaseDurationSecs: null,
+            activeLeaseCount: 0,
+            activeLeases: [],
+          },
           bios: {
             bootFilename: `${selected}/bios/lpxelinux.0`,
             nextServer: "set to the boopa host IP",
@@ -163,7 +176,8 @@ describe("DashboardPage", () => {
     expect(await screen.findByText("boopa")).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "boopa logo" })).toBeInTheDocument();
     expect(await screen.findByText("Asset readiness for ubuntu")).toBeInTheDocument();
-    expect(await screen.findByText("Manual settings for ubuntu")).toBeInTheDocument();
+    expect(await screen.findByText("DHCP state for ubuntu")).toBeInTheDocument();
+    expect(await screen.findByText("Disabled")).toBeInTheDocument();
     expect(await screen.findByText("Ubuntu autoinstall defaults")).toBeInTheDocument();
 
     await userEvent.selectOptions(screen.getByLabelText("Distro"), "fedora");

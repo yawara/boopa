@@ -5,7 +5,12 @@ use actix_web::{
     body::to_bytes,
     test::{self, TestRequest},
 };
-use boopa::{app_state::AppState, config::Config, http, tftp::resolve_request};
+use boopa::{
+    app_state::AppState,
+    config::{Config, DhcpConfig},
+    http,
+    tftp::resolve_request,
+};
 use boot_recipe::DistroId;
 
 #[tokio::test]
@@ -24,6 +29,7 @@ async fn resolves_tftp_request_for_cached_asset() {
             api_bind: ([127, 0, 0, 1], 0).into(),
             tftp_bind: ([127, 0, 0, 1], 0).into(),
             tftp_advertise_addr: ([127, 0, 0, 1], 6969).into(),
+            dhcp: DhcpConfig::default(),
             data_dir: tempdir.path().join("data"),
             frontend_dir: tempdir.path().join("frontend"),
         })
@@ -43,6 +49,7 @@ async fn resolves_tftp_request_for_generated_grub_alias() {
             api_bind: ([127, 0, 0, 1], 0).into(),
             tftp_bind: ([127, 0, 0, 1], 0).into(),
             tftp_advertise_addr: ([10, 0, 2, 2], 16969).into(),
+            dhcp: DhcpConfig::default(),
             data_dir: tempdir.path().join("data"),
             frontend_dir: tempdir.path().join("frontend"),
         })
@@ -65,6 +72,7 @@ async fn generated_grub_config_contains_ubuntu_iso_url() {
             api_bind: ([127, 0, 0, 1], 18080).into(),
             tftp_bind: ([127, 0, 0, 1], 0).into(),
             tftp_advertise_addr: ([10, 0, 2, 2], 16969).into(),
+            dhcp: DhcpConfig::default(),
             data_dir: tempdir.path().join("data"),
             frontend_dir: tempdir.path().join("frontend"),
         })
@@ -100,6 +108,7 @@ async fn generated_tftp_grub_aliases_follow_selected_fedora_distro() {
             api_bind: ([127, 0, 0, 1], 18080).into(),
             tftp_bind: ([127, 0, 0, 1], 0).into(),
             tftp_advertise_addr: ([10, 0, 2, 2], 16969).into(),
+            dhcp: DhcpConfig::default(),
             data_dir: tempdir.path().join("data"),
             frontend_dir: tempdir.path().join("frontend"),
         })

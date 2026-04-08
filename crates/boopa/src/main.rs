@@ -11,6 +11,6 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    let config = boopa::config::Config::from_env();
+    let config = boopa::config::Config::from_env()?;
     boopa::run(config).await
 }

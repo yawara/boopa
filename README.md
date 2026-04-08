@@ -8,7 +8,7 @@ This project is still in an early stage. Expect breaking changes, missing harden
 
 ![boopa](./boopa.png)
 
-`boopa` is a single-service network boot controller for a trusted office LAN. It serves boot assets over HTTP and TFTP, persists the currently selected distro, and exposes a small dashboard/API so a DHCP administrator can switch the active distro and read the DHCP values they must configure manually.
+`boopa` is a single-service network boot controller for a trusted office LAN. It serves boot assets over HTTP and TFTP, can optionally act as an authoritative DHCPv4 server for a bounded PXE subnet, persists the currently selected distro, and exposes a small dashboard/API so an operator can inspect DHCP state and boot guidance in one place.
 
 ## Scope
 
@@ -20,9 +20,10 @@ This project is still in an early stage. Expect breaking changes, missing harden
 - Ubuntu custom image builds are supported in a bounded v1 build lane: Linux-host-only, root-required, and verified with a backendless Ubuntu UEFI smoke path
 - `boopa` remains the network-boot controller; custom image builds are a separate build lane, not a runtime distribution path
 
-Out of scope in v1:
+Out of scope in the current release:
 
-- DHCP writeback or DHCP server management
+- Proxy-DHCP / DHCP assist mode
+- Static reservations / MAC-pinned leases
 - Auth or access control
 - Post-install automation
 - Non-Ubuntu custom image builds
@@ -39,6 +40,13 @@ Out of scope in v1:
 - `BOOPA_API_BIND` default: `127.0.0.1:8080`
 - `BOOPA_TFTP_BIND` default: `0.0.0.0:6969`
 - `BOOPA_TFTP_ADVERTISE_ADDR` default: the TFTP bind address when it is guest-usable, otherwise `127.0.0.1:<tftp-port>`
+- `BOOPA_DHCP_MODE` default: `disabled`
+- `BOOPA_DHCP_BIND` default: `0.0.0.0:67`
+- `BOOPA_DHCP_SUBNET`: required when DHCP mode is `authoritative` (example `10.0.2.0/24`)
+- `BOOPA_DHCP_POOL_START` / `BOOPA_DHCP_POOL_END`: required when DHCP mode is `authoritative`
+- `BOOPA_DHCP_ROUTER`: optional IPv4 default gateway for leases
+- `BOOPA_DHCP_DNS`: optional comma-separated IPv4 DNS servers for leases
+- `BOOPA_DHCP_LEASE_SECS` default: `3600`
 - `BOOPA_DATA_DIR` default: `var/boopa`
 - `BOOPA_FRONTEND_DIR` default: `frontend/dist`
 
@@ -46,10 +54,16 @@ Out of scope in v1:
 
 - `GET /api/health`
 - `GET /api/distros`
-- `GET /api/dhcp`
+- `GET /api/dhcp` returns both manual BIOS/UEFI guidance and current DHCP runtime status
 - `PUT /api/selection`
 - `GET /api/cache`
 - `POST /api/cache/refresh`
+
+DHCP mode notes:
+
+- DHCP is disabled by default.
+- When `BOOPA_DHCP_MODE=authoritative`, boopa serves one IPv4 subnet with dynamic leases only.
+- Proxy-DHCP and static reservations are intentionally deferred.
 
 Cache refresh behavior:
 
@@ -78,6 +92,11 @@ Frontend:
 - `npm run build --prefix frontend`
 - `npx --prefix frontend playwright install chromium`
 - `npm run test:e2e --prefix frontend`
+
+DHCP verification for the current release:
+
+- Packet-level DHCP tests are the acceptance boundary for the authoritative DHCP runtime.
+- The existing QEMU smoke lane still verifies TFTP/HTTP boot assets and does not yet prove boopa-origin DHCP inside the guest network path.
 
 Frontend dev proxy:
 

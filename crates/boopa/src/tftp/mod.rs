@@ -116,7 +116,10 @@ mod tests {
 
     use tokio::{fs, net::UdpSocket, sync::Mutex, task::JoinHandle, time::timeout};
 
-    use crate::{app_state::AppState, config::Config};
+    use crate::{
+        app_state::AppState,
+        config::{Config, DhcpConfig},
+    };
 
     static TFTP_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
@@ -211,6 +214,7 @@ mod tests {
                 api_bind: ([127, 0, 0, 1], 0).into(),
                 tftp_bind,
                 tftp_advertise_addr: ([10, 0, 2, 2], 16969).into(),
+                dhcp: DhcpConfig::default(),
                 data_dir: tempdir.path().join("data"),
                 frontend_dir: tempdir.path().join("frontend"),
             })

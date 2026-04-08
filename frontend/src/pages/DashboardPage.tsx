@@ -127,7 +127,7 @@ export function DashboardPage() {
                   boopa
                 </Typography>
                 <Typography color="text.secondary" maxWidth={720} variant="h6">
-                  Switch the active distro, inspect the DHCP values the network needs, and verify
+                  Switch the active distro, inspect authoritative DHCP runtime state, and verify
                   that the next BIOS and UEFI boots have cached assets ready.
                 </Typography>
               </Stack>

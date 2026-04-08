@@ -2,6 +2,7 @@ pub mod app_state;
 pub mod autoinstall;
 pub mod boot_assets;
 pub mod config;
+pub mod dhcp;
 pub mod http;
 pub mod persistence;
 pub mod tftp;
@@ -22,7 +23,22 @@ pub async fn run(config: config::Config) -> anyhow::Result<()> {
         }
     });
 
-    info!(api_bind=%config.api_bind, tftp_bind=%config.tftp_bind, "boopa started");
+    if config.dhcp.enabled() {
+        let dhcp_state = state.clone();
+        tokio::spawn(async move {
+            if let Err(error) = dhcp::serve(dhcp_state).await {
+                tracing::error!(?error, "dhcp server exited");
+            }
+        });
+    }
+
+    info!(
+        api_bind=%config.api_bind,
+        tftp_bind=%config.tftp_bind,
+        dhcp_mode=?config.dhcp.mode,
+        dhcp_bind=%config.dhcp.bind,
+        "boopa started"
+    );
 
     HttpServer::new(move || {
         let state = state.clone();

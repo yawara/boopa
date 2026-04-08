@@ -8,7 +8,7 @@ use actix_web::{
 };
 use boopa::app_state::AppState;
 use boopa::autoinstall::{default_password_hash, fingerprint_password_hash};
-use boopa::config::Config;
+use boopa::config::{Config, DhcpConfig};
 use boopa::http;
 use boot_recipe::{BootMode, DistroId, get_recipe};
 use sha2::{Digest, Sha256};
@@ -20,6 +20,7 @@ fn test_config() -> (tempfile::TempDir, Config) {
         api_bind: ([127, 0, 0, 1], 18080).into(),
         tftp_bind: ([127, 0, 0, 1], 0).into(),
         tftp_advertise_addr: ([127, 0, 0, 1], 6969).into(),
+        dhcp: DhcpConfig::default(),
         data_dir: temp_dir.path().join("data"),
         frontend_dir: temp_dir.path().join("frontend"),
     };
@@ -90,10 +91,21 @@ async fn dhcp_endpoint_returns_both_boot_modes_by_default() {
     assert_eq!(response.status(), StatusCode::OK);
 
     let body = to_bytes(response.into_body()).await.expect("body");
-    let payload = String::from_utf8(body.to_vec()).expect("utf8");
-    assert!(payload.contains("bios"));
-    assert!(payload.contains("uefi"));
-    assert!(payload.contains("iso-url=http://127.0.0.1:18080/boot/ubuntu/uefi/live-server.iso"));
+    let payload: serde_json::Value = serde_json::from_slice(&body).expect("json");
+    assert_eq!(payload["runtime"]["mode"], "disabled");
+    assert_eq!(payload["runtime"]["activeLeaseCount"], 0);
+    assert_eq!(payload["bios"]["architecture"], "x86 BIOS");
+    assert_eq!(payload["uefi"]["architecture"], "x86_64 UEFI");
+    assert!(
+        payload["uefi"]["notes"]
+            .as_array()
+            .expect("notes")
+            .iter()
+            .any(|note| note
+                .as_str()
+                .expect("note")
+                .contains("iso-url=http://127.0.0.1:18080/boot/ubuntu/uefi/live-server.iso"))
+    );
 }
 
 #[actix_web::test]
