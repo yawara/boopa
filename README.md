@@ -124,15 +124,14 @@ npx --prefix frontend playwright install chromium
 npm run test:e2e --prefix frontend
 ```
 
-Smoke scripts:
+Smoke CLI:
 
-- `scripts/smoke/boot-ubuntu-bios.sh`
-- `scripts/smoke/boot-ubuntu-uefi.sh`
-- `scripts/smoke/boot-fedora-bios.sh`
-- `scripts/smoke/boot-fedora-uefi.sh`
-- `scripts/smoke/boot-arch-bios.sh`
-- `scripts/smoke/boot-arch-uefi.sh`
-- `scripts/smoke/test-harness.sh`
+- `python3 -m scripts.smoke run --distro ubuntu --boot-mode uefi`
+- `python3 -m scripts.smoke run --distro ubuntu --boot-mode bios`
+- `python3 -m scripts.smoke run --distro fedora --boot-mode uefi`
+- `python3 -m scripts.smoke run --distro fedora --boot-mode bios`
+- `python3 -m scripts.smoke custom-image`
+- `python3 -m scripts.smoke.test_harness`
 
 ## Notes
 
@@ -140,13 +139,15 @@ The smoke scripts are structured entrypoints for a QEMU-based verification lane.
 
 Current scope of the concrete harness:
 
-- `scripts/smoke/boot-ubuntu-uefi.sh` is the only implemented target today.
-- Other smoke entrypoints fail fast with a clear "not implemented" message.
-- The harness starts `boopa`, refreshes the Ubuntu cache through `POST /api/cache/refresh`, and treats `boopa` as the only source of Ubuntu UEFI boot assets.
+- The canonical surface is `python3 -m scripts.smoke`; legacy shell entrypoints have been removed.
+- Formal target coverage is `Ubuntu/Fedora x UEFI/BIOS`, with `custom-image` retained as an Ubuntu UEFI-only lane.
+- `Arch` is not part of the supported matrix.
+- The harness emits a structured execution plan (`logs/plan.json`) during dry-runs so reviewers can inspect commands, helper processes, and side effects without reading shell internals.
 - The guest-path backend is selected with `SMOKE_NETWORK_MODE`.
   - `user` remains the legacy debug/support path and is not DHCP acceptance.
   - `vde` is the current mac-host acceptance path. It starts a user-space `vde_switch` plus a host helper process and keeps `boopa` directly on the host.
   - `vmnet-host` is still available as an experimental backend with `SMOKE_DHCP_HELPER_MODE=podman-relay`, but some host/QEMU combinations reject vmnet interface creation without extra privileges or entitlements.
+- BIOS targets are modeled explicitly in the support matrix and planner, but live execution on this host remains unverified until a representative BIOS smoke lane is exercised end to end.
 - During smoke runs, `BOOPA_DATA_DIR/cache` is symlinked to `var/boopa/cache` (or `SMOKE_SOURCE_DATA_DIR/cache`) so cached assets and `manifest.json` are reused across runs.
 - If a temporary FAT boot volume is needed for the first-stage firmware handoff, it is limited to firmware-carrier files plus `boopa`-served copies of the bootloader and GRUB config.
 - `boopa` now generates and serves the Ubuntu UEFI `grub.cfg`; kernel and initrd are fetched from `boopa` over TFTP as `ubuntu/uefi/kernel` and `ubuntu/uefi/initrd`, while the generated `iso-url` points clients at `/boot/ubuntu/uefi/live-server.iso` over HTTP.
@@ -160,24 +161,24 @@ Current scope of the concrete harness:
 Canonical custom-image smoke shape:
 
 - set `CUSTOM_IMAGE_BASE_ISO`, `CUSTOM_IMAGE_MANIFEST`, and `CUSTOM_IMAGE_OUTPUT_ISO`
-- run `scripts/smoke/boot-ubuntu-custom-image.sh`
+- run `python3 -m scripts.smoke custom-image`
 - the lane builds the ISO if needed, then boots the generated Ubuntu UEFI image without starting `boopa`
 
 Typical local smoke verification:
 
 ```sh
-scripts/smoke/boot-ubuntu-uefi.sh
+python3 -m scripts.smoke run --distro ubuntu --boot-mode uefi
 ```
 
 Typical mac-host guest-path smoke shape:
 
 ```sh
-SMOKE_NETWORK_MODE=vde \
-scripts/smoke/boot-ubuntu-uefi.sh
+python3 -m scripts.smoke plan --distro ubuntu --boot-mode uefi --network-mode vde --format json
+python3 -m scripts.smoke run --distro ubuntu --boot-mode uefi --network-mode vde
 ```
 
 Dry-run/regression verification for the harness itself:
 
 ```sh
-scripts/smoke/test-harness.sh
+python3 -m scripts.smoke.test_harness
 ```

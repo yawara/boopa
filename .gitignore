@@ -8,6 +8,11 @@
 .DS_Store
 var/
 .omx/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 .codex/*
 !.codex/agents/
 !.codex/agents/**
