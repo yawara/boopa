@@ -124,11 +124,19 @@ impl AppState {
         })
     }
 
-    pub async fn refresh_cache(&self, distro: Option<DistroId>) -> Result<CacheResponse> {
+    pub async fn refresh_cache(
+        &self,
+        distro: Option<DistroId>,
+        mode: Option<boot_recipe::BootMode>,
+    ) -> Result<CacheResponse> {
         let selected = distro.unwrap_or(self.selected_distro().await);
+        let entries = match mode {
+            Some(m) => self.cache.refresh_distro_mode(selected, m).await?,
+            None => self.cache.refresh_distro(selected).await?,
+        };
         Ok(CacheResponse {
             selected,
-            entries: self.cache.refresh_distro(selected).await?,
+            entries,
         })
     }
 

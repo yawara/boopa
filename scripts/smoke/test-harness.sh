@@ -49,11 +49,11 @@ assert_symlink_target() {
 }
 
 unsupported_log="${TMP_DIR}/unsupported.log"
-if "${REPO_ROOT}/scripts/smoke/common.sh" fedora uefi >"${unsupported_log}" 2>&1; then
+if "${REPO_ROOT}/scripts/smoke/common.sh" arch bios >"${unsupported_log}" 2>&1; then
   echo "expected unsupported target to fail" >&2
   exit 1
 fi
-assert_contains "only ubuntu uefi is implemented right now" "${unsupported_log}"
+assert_contains "unsupported target" "${unsupported_log}"
 
 SOURCE_DATA_DIR="${TMP_DIR}/source-data"
 SOURCE_CACHE_DIR="${SOURCE_DATA_DIR}/cache/ubuntu/uefi"
@@ -109,6 +109,92 @@ assert_missing "${GRUB_CFG_ALIAS}"
 assert_missing "${GRUB_CFG_ALIAS_NESTED}"
 assert_missing "${KERNEL_PATH}"
 assert_missing "${INITRD_PATH}"
+
+FEDORA_SOURCE_CACHE_DIR="${SOURCE_DATA_DIR}/cache/fedora/uefi"
+mkdir -p "${FEDORA_SOURCE_CACHE_DIR}"
+printf 'shim-bytes\n' >"${FEDORA_SOURCE_CACHE_DIR}/shimx64.efi"
+printf 'grub-bytes\n' >"${FEDORA_SOURCE_CACHE_DIR}/grubx64.efi"
+printf 'kernel-bytes\n' >"${FEDORA_SOURCE_CACHE_DIR}/kernel"
+printf 'initrd-bytes\n' >"${FEDORA_SOURCE_CACHE_DIR}/initrd"
+
+SMOKE_DRY_RUN=1 \
+SMOKE_WORK_ROOT="${TMP_DIR}/work" \
+SMOKE_TIMESTAMP="20260405T170010Z" \
+SMOKE_API_PORT=18080 \
+SMOKE_TFTP_PORT=16969 \
+SYSTEM_DISK_GB=48 \
+SMOKE_SOURCE_DATA_DIR="${SOURCE_DATA_DIR}" \
+"${REPO_ROOT}/scripts/smoke/common.sh" fedora uefi >"${TMP_DIR}/fedora-dry-run.log"
+
+FEDORA_QEMU_CMD_LOG="${TMP_DIR}/work/fedora-uefi-20260405T170010Z/logs/qemu-command.txt"
+FEDORA_BOOTX64="${TMP_DIR}/work/fedora-uefi-20260405T170010Z/boot-root/EFI/BOOT/BOOTX64.EFI"
+FEDORA_STARTUP_NSH="${TMP_DIR}/work/fedora-uefi-20260405T170010Z/boot-root/startup.nsh"
+FEDORA_GRUB_CFG="${TMP_DIR}/work/fedora-uefi-20260405T170010Z/boot-root/grub/grub.cfg"
+FEDORA_KERNEL_PATH="${TMP_DIR}/work/fedora-uefi-20260405T170010Z/boot-root/fedora/uefi/kernel"
+FEDORA_INITRD_PATH="${TMP_DIR}/work/fedora-uefi-20260405T170010Z/boot-root/fedora/uefi/initrd"
+FEDORA_SYSTEM_DISK_PATH="${TMP_DIR}/work/fedora-uefi-20260405T170010Z/system-disk.qcow2"
+FEDORA_SERVICE_CACHE_LINK="${TMP_DIR}/work/fedora-uefi-20260405T170010Z/service-data/cache"
+
+[[ -f "${FEDORA_QEMU_CMD_LOG}" ]] || { echo "expected fedora qemu command log at ${FEDORA_QEMU_CMD_LOG}" >&2; exit 1; }
+[[ -f "${FEDORA_BOOTX64}" ]] || { echo "expected fedora bootloader at ${FEDORA_BOOTX64}" >&2; exit 1; }
+[[ -f "${FEDORA_STARTUP_NSH}" ]] || { echo "expected fedora startup.nsh at ${FEDORA_STARTUP_NSH}" >&2; exit 1; }
+[[ -f "${FEDORA_SYSTEM_DISK_PATH}" ]] || { echo "expected fedora installer disk at ${FEDORA_SYSTEM_DISK_PATH}" >&2; exit 1; }
+assert_symlink_target "${FEDORA_SERVICE_CACHE_LINK}" "${SOURCE_DATA_DIR}/cache"
+assert_contains "file=fat:rw:${TMP_DIR}/work/fedora-uefi-20260405T170010Z/boot-root" "${FEDORA_QEMU_CMD_LOG}"
+assert_contains "-m 8192" "${FEDORA_QEMU_CMD_LOG}"
+assert_contains "system-disk.qcow2" "${FEDORA_QEMU_CMD_LOG}"
+assert_contains "BOOTX64.EFI" "${FEDORA_STARTUP_NSH}"
+assert_not_contains "-kernel" "${FEDORA_QEMU_CMD_LOG}"
+assert_not_contains "-initrd" "${FEDORA_QEMU_CMD_LOG}"
+assert_missing "${FEDORA_GRUB_CFG}"
+assert_missing "${FEDORA_KERNEL_PATH}"
+assert_missing "${FEDORA_INITRD_PATH}"
+
+VMNET_DRY_RUN_LOG="${TMP_DIR}/vmnet-dry-run.log"
+SMOKE_DRY_RUN=1 \
+SMOKE_WORK_ROOT="${TMP_DIR}/work" \
+SMOKE_TIMESTAMP="20260405T170050Z" \
+SMOKE_NETWORK_MODE="vmnet-host" \
+SMOKE_VMNET_NET_UUID="123e4567-e89b-12d3-a456-426614174000" \
+SMOKE_DHCP_HELPER_MODE="podman-relay" \
+SMOKE_DHCP_UPSTREAM_PORT="1067" \
+SMOKE_DHCP_HELPER_IMAGE="docker.io/library/python:3.12-alpine" \
+SMOKE_SOURCE_DATA_DIR="${SOURCE_DATA_DIR}" \
+"${REPO_ROOT}/scripts/smoke/common.sh" ubuntu uefi >"${VMNET_DRY_RUN_LOG}"
+
+VMNET_QEMU_CMD_LOG="${TMP_DIR}/work/ubuntu-uefi-20260405T170050Z/logs/qemu-command.txt"
+VMNET_DHCP_HELPER_CMD_LOG="${TMP_DIR}/work/ubuntu-uefi-20260405T170050Z/logs/dhcp-helper-command.txt"
+[[ -f "${VMNET_QEMU_CMD_LOG}" ]] || { echo "expected vmnet qemu command log at ${VMNET_QEMU_CMD_LOG}" >&2; exit 1; }
+[[ -f "${VMNET_DHCP_HELPER_CMD_LOG}" ]] || { echo "expected DHCP helper command log at ${VMNET_DHCP_HELPER_CMD_LOG}" >&2; exit 1; }
+assert_contains "vmnet-host\\,id=net0" "${VMNET_QEMU_CMD_LOG}"
+assert_contains "net-uuid=123e4567-e89b-12d3-a456-426614174000" "${VMNET_QEMU_CMD_LOG}"
+assert_not_contains "user\\,id=net0" "${VMNET_QEMU_CMD_LOG}"
+assert_contains "podman run --rm -d --name boopa-dhcp-relay-20260405T170050Z" "${VMNET_DHCP_HELPER_CMD_LOG}"
+assert_contains "67:67/udp" "${VMNET_DHCP_HELPER_CMD_LOG}"
+assert_contains "/relay.py --listen-port 67 --upstream-host host.containers.internal --upstream-port 1067" "${VMNET_DHCP_HELPER_CMD_LOG}"
+assert_contains "Network mode: vmnet-host" "${VMNET_DRY_RUN_LOG}"
+assert_contains "DHCP helper mode: podman-relay" "${VMNET_DRY_RUN_LOG}"
+
+VDE_DRY_RUN_LOG="${TMP_DIR}/vde-dry-run.log"
+SMOKE_DRY_RUN=1 \
+SMOKE_WORK_ROOT="${TMP_DIR}/work" \
+SMOKE_TIMESTAMP="20260405T170060Z" \
+SMOKE_NETWORK_MODE="vde" \
+SMOKE_DHCP_UPSTREAM_PORT="1067" \
+SMOKE_SOURCE_DATA_DIR="${SOURCE_DATA_DIR}" \
+"${REPO_ROOT}/scripts/smoke/common.sh" ubuntu uefi >"${VDE_DRY_RUN_LOG}"
+
+VDE_QEMU_CMD_LOG="${TMP_DIR}/work/ubuntu-uefi-20260405T170060Z/logs/qemu-command.txt"
+VDE_HOST_HELPER_CMD_LOG="${TMP_DIR}/work/ubuntu-uefi-20260405T170060Z/logs/host-helper-command.txt"
+[[ -f "${VDE_QEMU_CMD_LOG}" ]] || { echo "expected vde qemu command log at ${VDE_QEMU_CMD_LOG}" >&2; exit 1; }
+[[ -f "${VDE_HOST_HELPER_CMD_LOG}" ]] || { echo "expected VDE host helper command log at ${VDE_HOST_HELPER_CMD_LOG}" >&2; exit 1; }
+assert_contains "vde\\,id=net0" "${VDE_QEMU_CMD_LOG}"
+assert_contains "sock=${TMP_DIR}/work/ubuntu-uefi-20260405T170060Z/vde.ctl" "${VDE_QEMU_CMD_LOG}"
+assert_contains "python3 ${REPO_ROOT}/scripts/smoke/vde_host_helper.py" "${VDE_HOST_HELPER_CMD_LOG}"
+assert_contains "--switch-dir ${TMP_DIR}/work/ubuntu-uefi-20260405T170060Z/vde.ctl" "${VDE_HOST_HELPER_CMD_LOG}"
+assert_contains "--tftp-upstream-host 127.0.0.1" "${VDE_HOST_HELPER_CMD_LOG}"
+assert_contains "--http-upstream-host 127.0.0.1" "${VDE_HOST_HELPER_CMD_LOG}"
+assert_contains "Network mode: vde" "${VDE_DRY_RUN_LOG}"
 
 CUSTOM_BASE_ISO="${TMP_DIR}/custom/base.iso"
 CUSTOM_MANIFEST="${TMP_DIR}/custom/manifest.yaml"
@@ -278,6 +364,8 @@ EOF
     esac
   }
 
+  SMOKE_DISTRO="ubuntu"
+  SMOKE_MODE="uefi"
   SMOKE_RUN_DIR="${SYNC_RUN_DIR}"
   SMOKE_SERVICE_DATA_DIR="${SYNC_RUN_DIR}/service-data"
   SMOKE_TFTP_ROOT="${SYNC_BOOT_ROOT}"
@@ -322,11 +410,195 @@ PROBE_LOG="${TMP_DIR}/probe.log"
     printf '%s\n' "$*" >>"${PROBE_LOG}"
   }
 
+  SMOKE_DISTRO="ubuntu"
+  SMOKE_MODE="uefi"
   SMOKE_API_HOST="127.0.0.1"
   SMOKE_API_PORT="18080"
   smoke_probe_assets
 )
 
 assert_contains "/boot/ubuntu/uefi/live-server.iso" "${PROBE_LOG}"
+
+GUEST_EVIDENCE_DIR="${TMP_DIR}/guest-evidence"
+mkdir -p "${GUEST_EVIDENCE_DIR}"
+GUEST_BACKEND_LOG="${GUEST_EVIDENCE_DIR}/backend.log"
+printf 'pre-qemu probe line\n' >"${GUEST_BACKEND_LOG}"
+(
+  set -euo pipefail
+  # shellcheck source=scripts/smoke/lib.sh
+  source "${REPO_ROOT}/scripts/smoke/lib.sh"
+
+  SMOKE_DISTRO="ubuntu"
+  SMOKE_MODE="uefi"
+  SMOKE_LANE="backend"
+  SMOKE_NETWORK_MODE="vmnet-host"
+  SMOKE_LOG_DIR="${GUEST_EVIDENCE_DIR}"
+  SMOKE_BACKEND_LOG="${GUEST_BACKEND_LOG}"
+  smoke_mark_guest_evidence_start
+  cat >>"${GUEST_BACKEND_LOG}" <<'EOF'
+dhcp lease response
+tftp serving asset served_path = ubuntu/uefi/kernel
+tftp serving asset served_path = ubuntu/uefi/initrd
+http serving cached boot asset requested_path = ubuntu/uefi/live-server.iso
+EOF
+  smoke_verify_guest_evidence
+)
+assert_contains "dhcp lease response" "${GUEST_EVIDENCE_DIR}/backend-guest-evidence.log"
+assert_contains "served_path = ubuntu/uefi/kernel" "${GUEST_EVIDENCE_DIR}/backend-guest-evidence.log"
+assert_contains "served_path = ubuntu/uefi/initrd" "${GUEST_EVIDENCE_DIR}/backend-guest-evidence.log"
+assert_contains "requested_path = ubuntu/uefi/live-server.iso" "${GUEST_EVIDENCE_DIR}/backend-guest-evidence.log"
+
+VDE_EVIDENCE_DIR="${TMP_DIR}/vde-evidence"
+mkdir -p "${VDE_EVIDENCE_DIR}"
+cat >"${VDE_EVIDENCE_DIR}/host-helper.log" <<'EOF'
+dhcp relay xid=deadbeef guest_mac=52:54:00:12:34:56
+tftp rrq path=ubuntu/uefi/kernel
+tftp rrq path=ubuntu/uefi/initrd
+http request GET /boot/ubuntu/uefi/live-server.iso HTTP/1.1
+EOF
+(
+  set -euo pipefail
+  # shellcheck source=scripts/smoke/lib.sh
+  source "${REPO_ROOT}/scripts/smoke/lib.sh"
+
+  SMOKE_DISTRO="ubuntu"
+  SMOKE_MODE="uefi"
+  SMOKE_LANE="backend"
+  SMOKE_NETWORK_MODE="vde"
+  SMOKE_LOG_DIR="${VDE_EVIDENCE_DIR}"
+  SMOKE_HOST_HELPER_LOG="${VDE_EVIDENCE_DIR}/host-helper.log"
+  smoke_verify_guest_evidence
+)
+
+FEDORA_SYNC_RUN_DIR="${TMP_DIR}/sync/fedora-uefi-20260405T170600Z"
+FEDORA_SYNC_BOOT_ROOT="${FEDORA_SYNC_RUN_DIR}/boot-root"
+FEDORA_SYNC_GRUB_CFG="${FEDORA_SYNC_BOOT_ROOT}/grub/grub.cfg"
+FEDORA_SYNC_GRUB_CFG_ALIAS="${FEDORA_SYNC_BOOT_ROOT}/boot/grub/grub.cfg"
+FEDORA_SYNC_GRUB2_CFG="${FEDORA_SYNC_BOOT_ROOT}/grub2/grub.cfg"
+FEDORA_SYNC_GRUB2_CFG_ALIAS="${FEDORA_SYNC_BOOT_ROOT}/boot/grub2/grub.cfg"
+FEDORA_SYNC_FEDORA_GRUB_CFG="${FEDORA_SYNC_BOOT_ROOT}/fedora/uefi/grub.cfg"
+FEDORA_SYNC_FEDORA_GRUB_CFG_NESTED="${FEDORA_SYNC_BOOT_ROOT}/fedora/uefi/grub/grub.cfg"
+FEDORA_FETCH_LOG="${FEDORA_SYNC_RUN_DIR}/fetch.log"
+FEDORA_SYNC_SERVICE_CACHE_LINK="${FEDORA_SYNC_RUN_DIR}/service-data/cache"
+
+(
+  set -euo pipefail
+  # shellcheck source=scripts/smoke/lib.sh
+  source "${REPO_ROOT}/scripts/smoke/lib.sh"
+
+  smoke_fetch_backend_asset() {
+    local asset_path="$1"
+    local destination_path="$2"
+    mkdir -p "$(dirname "${destination_path}")"
+    printf '%s\n' "${asset_path}" >>"${FEDORA_FETCH_LOG}"
+    case "${asset_path}" in
+      "fedora/uefi/shimx64.efi")
+        printf 'shim-from-boopa\n' >"${destination_path}"
+        ;;
+      "fedora/uefi/grubx64.efi")
+        printf 'grub-from-boopa\n' >"${destination_path}"
+        ;;
+      "fedora/uefi/grub.cfg")
+        cat >"${destination_path}" <<'EOF'
+set default=0
+set timeout=2
+
+menuentry "boopa fedora uefi smoke" {
+    linuxefi /fedora/uefi/kernel ip=dhcp inst.ks=http://10.0.2.2:18080/boot/fedora/uefi/kickstart/ks.cfg console=ttyS0,115200n8
+    initrdefi /fedora/uefi/initrd
+    boot
+}
+EOF
+        ;;
+      *)
+        echo "unexpected backend fetch for ${asset_path}" >&2
+        exit 1
+        ;;
+    esac
+  }
+
+  SMOKE_DISTRO="fedora"
+  SMOKE_MODE="uefi"
+  SMOKE_RUN_DIR="${FEDORA_SYNC_RUN_DIR}"
+  SMOKE_SERVICE_DATA_DIR="${FEDORA_SYNC_RUN_DIR}/service-data"
+  SMOKE_TFTP_ROOT="${FEDORA_SYNC_BOOT_ROOT}"
+  SMOKE_LOG_DIR="${FEDORA_SYNC_RUN_DIR}/logs"
+  SMOKE_SOURCE_DATA_DIR="${SOURCE_DATA_DIR}"
+
+  smoke_prepare_workspace
+  smoke_sync_boot_root_from_backend
+)
+
+[[ -f "${FEDORA_SYNC_GRUB_CFG}" ]] || { echo "expected staged grub config at ${FEDORA_SYNC_GRUB_CFG}" >&2; exit 1; }
+[[ -f "${FEDORA_SYNC_GRUB_CFG_ALIAS}" ]] || { echo "expected staged grub config at ${FEDORA_SYNC_GRUB_CFG_ALIAS}" >&2; exit 1; }
+[[ -f "${FEDORA_SYNC_GRUB2_CFG}" ]] || { echo "expected staged grub2 config at ${FEDORA_SYNC_GRUB2_CFG}" >&2; exit 1; }
+[[ -f "${FEDORA_SYNC_GRUB2_CFG_ALIAS}" ]] || { echo "expected staged grub2 config at ${FEDORA_SYNC_GRUB2_CFG_ALIAS}" >&2; exit 1; }
+[[ -f "${FEDORA_SYNC_FEDORA_GRUB_CFG}" ]] || { echo "expected staged grub config at ${FEDORA_SYNC_FEDORA_GRUB_CFG}" >&2; exit 1; }
+[[ -f "${FEDORA_SYNC_FEDORA_GRUB_CFG_NESTED}" ]] || { echo "expected staged grub config at ${FEDORA_SYNC_FEDORA_GRUB_CFG_NESTED}" >&2; exit 1; }
+[[ -f "${FEDORA_FETCH_LOG}" ]] || { echo "expected fetch log at ${FEDORA_FETCH_LOG}" >&2; exit 1; }
+assert_symlink_target "${FEDORA_SYNC_SERVICE_CACHE_LINK}" "${SOURCE_DATA_DIR}/cache"
+
+assert_contains "fedora/uefi/shimx64.efi" "${FEDORA_FETCH_LOG}"
+assert_contains "fedora/uefi/grubx64.efi" "${FEDORA_FETCH_LOG}"
+assert_contains "fedora/uefi/grub.cfg" "${FEDORA_FETCH_LOG}"
+assert_not_contains "fedora/uefi/kernel" "${FEDORA_FETCH_LOG}"
+assert_not_contains "fedora/uefi/initrd" "${FEDORA_FETCH_LOG}"
+
+assert_contains "linuxefi /fedora/uefi/kernel" "${FEDORA_SYNC_GRUB_CFG}"
+assert_contains "inst.ks=http://10.0.2.2:18080/boot/fedora/uefi/kickstart/ks.cfg" "${FEDORA_SYNC_GRUB_CFG}"
+assert_contains "initrdefi /fedora/uefi/initrd" "${FEDORA_SYNC_GRUB_CFG}"
+assert_contains "linuxefi /fedora/uefi/kernel" "${FEDORA_SYNC_GRUB2_CFG}"
+assert_contains "linuxefi /fedora/uefi/kernel" "${FEDORA_SYNC_FEDORA_GRUB_CFG}"
+assert_contains "linuxefi /fedora/uefi/kernel" "${FEDORA_SYNC_FEDORA_GRUB_CFG_NESTED}"
+
+FEDORA_PROBE_LOG="${TMP_DIR}/fedora-probe.log"
+(
+  set -euo pipefail
+  # shellcheck source=scripts/smoke/lib.sh
+  source "${REPO_ROOT}/scripts/smoke/lib.sh"
+
+  curl() {
+    printf '%s\n' "$*" >>"${FEDORA_PROBE_LOG}"
+  }
+
+  SMOKE_DISTRO="fedora"
+  SMOKE_MODE="uefi"
+  SMOKE_API_HOST="127.0.0.1"
+  SMOKE_API_PORT="18080"
+  smoke_probe_assets
+)
+
+assert_contains "/boot/fedora/uefi/shimx64.efi" "${FEDORA_PROBE_LOG}"
+assert_contains "/boot/fedora/uefi/kickstart/ks.cfg" "${FEDORA_PROBE_LOG}"
+assert_not_contains "/boot/ubuntu/" "${FEDORA_PROBE_LOG}"
+
+FEDORA_EVIDENCE_DIR="${TMP_DIR}/fedora-evidence"
+mkdir -p "${FEDORA_EVIDENCE_DIR}"
+FEDORA_EVIDENCE_BACKEND_LOG="${FEDORA_EVIDENCE_DIR}/backend.log"
+printf 'pre-qemu probe line\n' >"${FEDORA_EVIDENCE_BACKEND_LOG}"
+(
+  set -euo pipefail
+  # shellcheck source=scripts/smoke/lib.sh
+  source "${REPO_ROOT}/scripts/smoke/lib.sh"
+
+  SMOKE_DISTRO="fedora"
+  SMOKE_MODE="uefi"
+  SMOKE_LANE="backend"
+  SMOKE_NETWORK_MODE="vmnet-host"
+  SMOKE_LOG_DIR="${FEDORA_EVIDENCE_DIR}"
+  SMOKE_BACKEND_LOG="${FEDORA_EVIDENCE_BACKEND_LOG}"
+  smoke_mark_guest_evidence_start
+  cat >>"${FEDORA_EVIDENCE_BACKEND_LOG}" <<'EOF'
+dhcp lease response
+tftp serving asset served_path = fedora/uefi/kernel
+tftp serving asset served_path = fedora/uefi/initrd
+http serving cached boot asset requested_path = fedora/uefi/kickstart/ks.cfg
+EOF
+  smoke_verify_guest_evidence
+)
+assert_contains "dhcp lease response" "${FEDORA_EVIDENCE_DIR}/backend-guest-evidence.log"
+assert_contains "served_path = fedora/uefi/kernel" "${FEDORA_EVIDENCE_DIR}/backend-guest-evidence.log"
+assert_contains "served_path = fedora/uefi/initrd" "${FEDORA_EVIDENCE_DIR}/backend-guest-evidence.log"
+assert_contains "requested_path = fedora/uefi/kickstart/ks.cfg" "${FEDORA_EVIDENCE_DIR}/backend-guest-evidence.log"
 
 echo "smoke harness dry-run regression checks passed"

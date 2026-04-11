@@ -112,6 +112,17 @@ pub async fn response_for_datagram(
         .authoritative_subnet()
         .expect("authoritative subnet");
 
+    tracing::info!(
+        %peer,
+        message_type = ?request.message_type,
+        response_type = ?response_type,
+        boot_mode = ?boot_mode,
+        distro = ?selected,
+        lease_ip = %lease.ip_address,
+        client_mac = %request.client_mac_string(),
+        "dhcp lease response"
+    );
+
     let response = request.build_response(
         response_type,
         lease.ip_address,

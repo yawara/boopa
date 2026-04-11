@@ -214,7 +214,7 @@ fn render_fedora_uefi_grub_cfg(tftp_endpoint: SocketAddr, guest_http_base_url: &
 }
 
 fn render_fedora_uefi_kickstart() -> String {
-    "lang en_US.UTF-8\nkeyboard us\ntimezone UTC --utc\nnetwork --bootproto=dhcp --device=link --activate\nrootpw --lock\ntext\nreboot\nzerombr\nclearpart --all --initlabel\nautopart\n%packages\n@^minimal-environment\n%end\n".to_string()
+    "url --url=https://download.fedoraproject.org/pub/fedora/linux/releases/42/Server/x86_64/os/\nlang en_US.UTF-8\nkeyboard us\ntimezone UTC --utc\nnetwork --bootproto=dhcp --device=link --activate\nrootpw --lock\ntext\nreboot\nzerombr\nclearpart --all --initlabel\nautopart\n%packages\n@^minimal-environment\n%end\n".to_string()
 }
 
 #[cfg(test)]
@@ -416,6 +416,7 @@ mod tests {
         let kickstart_payload =
             String::from_utf8(runtime.block_on(kickstart.read_bytes()).expect("bytes"))
                 .expect("utf8");
+        assert!(kickstart_payload.contains("url --url=https://download.fedoraproject.org/pub/fedora/linux/releases/42/Server/x86_64/os/"));
         assert!(kickstart_payload.contains("lang en_US.UTF-8"));
         assert!(kickstart_payload.contains("%packages"));
     }

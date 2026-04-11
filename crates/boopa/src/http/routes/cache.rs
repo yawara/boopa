@@ -9,6 +9,7 @@ use crate::app_state::AppState;
 #[derive(Debug, Deserialize)]
 pub struct RefreshRequest {
     pub distro: Option<DistroId>,
+    pub mode: Option<boot_recipe::BootMode>,
 }
 
 pub fn configure(cfg: &mut web::ServiceConfig) {
@@ -27,9 +28,10 @@ pub async fn refresh_cache(
     state: web::Data<Arc<AppState>>,
     payload: Option<web::Json<RefreshRequest>>,
 ) -> HttpResponse {
-    match state
-        .refresh_cache(payload.and_then(|request| request.distro))
-        .await
+    let (distro, mode) = payload
+        .map(|request| (request.distro, request.mode))
+        .unwrap_or((None, None));
+    match state.refresh_cache(distro, mode).await
     {
         Ok(response) => HttpResponse::Ok().json(response),
         Err(error) => HttpResponse::BadGateway().body(error.to_string()),

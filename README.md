@@ -95,8 +95,10 @@ Frontend:
 
 DHCP verification for the current release:
 
-- Packet-level DHCP tests are the acceptance boundary for the authoritative DHCP runtime.
-- The existing QEMU smoke lane still verifies TFTP/HTTP boot assets and does not yet prove boopa-origin DHCP inside the guest network path.
+- Packet-level DHCP tests remain the fast regression floor for the authoritative DHCP runtime.
+- The working guest-path acceptance lane is the mac-host `SMOKE_NETWORK_MODE=vde` smoke path, where `boopa` keeps running directly on macOS and a user-space VDE helper bridges guest DHCP/TFTP/HTTP traffic back to the host process.
+- `SMOKE_NETWORK_MODE=vmnet-host` remains an experimental fallback, but on this host/QEMU combination it fails to create the vmnet interface without extra privileges or entitlements.
+- Do not treat the legacy `-netdev user` smoke path as proof of boopa-origin DHCP inside the guest network path.
 
 Frontend dev proxy:
 
@@ -141,10 +143,15 @@ Current scope of the concrete harness:
 - `scripts/smoke/boot-ubuntu-uefi.sh` is the only implemented target today.
 - Other smoke entrypoints fail fast with a clear "not implemented" message.
 - The harness starts `boopa`, refreshes the Ubuntu cache through `POST /api/cache/refresh`, and treats `boopa` as the only source of Ubuntu UEFI boot assets.
+- The guest-path backend is selected with `SMOKE_NETWORK_MODE`.
+  - `user` remains the legacy debug/support path and is not DHCP acceptance.
+  - `vde` is the current mac-host acceptance path. It starts a user-space `vde_switch` plus a host helper process and keeps `boopa` directly on the host.
+  - `vmnet-host` is still available as an experimental backend with `SMOKE_DHCP_HELPER_MODE=podman-relay`, but some host/QEMU combinations reject vmnet interface creation without extra privileges or entitlements.
 - During smoke runs, `BOOPA_DATA_DIR/cache` is symlinked to `var/boopa/cache` (or `SMOKE_SOURCE_DATA_DIR/cache`) so cached assets and `manifest.json` are reused across runs.
 - If a temporary FAT boot volume is needed for the first-stage firmware handoff, it is limited to firmware-carrier files plus `boopa`-served copies of the bootloader and GRUB config.
 - `boopa` now generates and serves the Ubuntu UEFI `grub.cfg`; kernel and initrd are fetched from `boopa` over TFTP as `ubuntu/uefi/kernel` and `ubuntu/uefi/initrd`, while the generated `iso-url` points clients at `/boot/ubuntu/uefi/live-server.iso` over HTTP.
 - Ubuntu UEFI clients must reach both the advertised TFTP endpoint and `http://<boopa-host>:<api-port>/boot/ubuntu/uefi/live-server.iso`.
+- For the mac-host guest-path lane, `boopa` binds DHCP on an unprivileged localhost port and the selected helper backend bridges guest traffic back to that host process; this keeps the workflow under ordinary user permissions without moving `boopa` into a VM or container.
 - The Ubuntu UEFI smoke path defaults to `RAM_MB=8192` and provisions a `SYSTEM_DISK_GB=32` qcow2 installer disk because the live installer downloads a multi-gigabyte ISO before pivoting to the live filesystem.
 - The smoke harness picks random high unprivileged API/TFTP ports by default to avoid local port collisions.
 - When launched from an interactive terminal, the harness attaches QEMU serial I/O to that terminal and enables a QEMU display window by default so VGA/installer output is visible. Set `SMOKE_INTERACTIVE=0` to force headless mode, or override the interactive display backend with `SMOKE_QEMU_DISPLAY` if `default` is not suitable on your host.
@@ -159,6 +166,13 @@ Canonical custom-image smoke shape:
 Typical local smoke verification:
 
 ```sh
+scripts/smoke/boot-ubuntu-uefi.sh
+```
+
+Typical mac-host guest-path smoke shape:
+
+```sh
+SMOKE_NETWORK_MODE=vde \
 scripts/smoke/boot-ubuntu-uefi.sh
 ```
 

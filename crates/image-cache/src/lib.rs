@@ -104,12 +104,32 @@ impl ImageCache {
     }
 
     pub async fn refresh_distro(&self, distro: DistroId) -> Result<Vec<CacheEntry>, CacheError> {
+        self.refresh_distro_modes(distro, None).await
+    }
+
+    pub async fn refresh_distro_mode(
+        &self,
+        distro: DistroId,
+        mode: BootMode,
+    ) -> Result<Vec<CacheEntry>, CacheError> {
+        self.refresh_distro_modes(distro, Some(mode)).await
+    }
+
+    async fn refresh_distro_modes(
+        &self,
+        distro: DistroId,
+        mode_filter: Option<BootMode>,
+    ) -> Result<Vec<CacheEntry>, CacheError> {
         info!(%distro, cache_root = %self.root.display(), "refreshing distro cache");
         let _manifest_guard = self.manifest_lock.lock().await;
         let mut manifest = self.load_manifest().await?;
         let mut entries = Vec::new();
 
-        for mode in [BootMode::Bios, BootMode::Uefi] {
+        let modes: Vec<BootMode> = match mode_filter {
+            Some(mode) => vec![mode],
+            None => vec![BootMode::Bios, BootMode::Uefi],
+        };
+        for mode in modes {
             let recipe = get_recipe(distro, mode)?;
             for asset in recipe.assets {
                 let path = self.resolve(&asset.relative_path);
