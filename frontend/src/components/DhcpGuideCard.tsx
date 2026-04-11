@@ -5,7 +5,12 @@ import {
   Typography,
 } from "@mui/material";
 
-import type { DhcpGuidance, DhcpResponse } from "../services/api";
+import type {
+  DhcpGuidance,
+  DhcpLeaseSummary,
+  DhcpResponse,
+  DhcpRuntimeStatusResponse,
+} from "../services/api";
 
 function ModeGuide({ mode, guide }: { mode: string; guide: DhcpGuidance }) {
   return (
@@ -111,6 +116,111 @@ function ModeGuide({ mode, guide }: { mode: string; guide: DhcpGuidance }) {
   );
 }
 
+function RuntimeStatusCard({ runtime }: { runtime: DhcpRuntimeStatusResponse }) {
+  const leasePreview = runtime.activeLeases.slice(0, 4);
+
+  return (
+    <Paper
+      sx={{
+        bgcolor: "rgba(233, 240, 235, 0.86)",
+        p: 3,
+        borderRadius: 3.5,
+        border: "1px solid rgba(58, 94, 71, 0.12)",
+      }}
+    >
+      <Stack spacing={2.5}>
+        <div>
+          <Typography color="text.secondary" fontSize="0.75rem" fontWeight={700} letterSpacing="0.12em" textTransform="uppercase">
+            DHCP Runtime
+          </Typography>
+          <Typography component="h3" variant="h6">
+            {runtime.enabled ? "Authoritative mode enabled" : "Disabled"}
+          </Typography>
+        </div>
+
+        <Box
+          sx={{
+            display: "grid",
+            gap: 2,
+            gridTemplateColumns: {
+              xs: "minmax(0, 1fr)",
+              sm: "repeat(2, minmax(0, 1fr))",
+            },
+          }}
+        >
+          <RuntimeField label="Mode" value={runtime.mode} />
+          <RuntimeField label="Bind" value={runtime.bindAddress} />
+          <RuntimeField label="Subnet" value={runtime.subnet ?? "not configured"} />
+          <RuntimeField
+            label="Pool"
+            value={
+              runtime.poolStart && runtime.poolEnd
+                ? `${runtime.poolStart} - ${runtime.poolEnd}`
+                : "not configured"
+            }
+          />
+          <RuntimeField label="Router" value={runtime.router ?? "not configured"} />
+          <RuntimeField
+            label="Lease Duration"
+            value={runtime.leaseDurationSecs ? `${runtime.leaseDurationSecs}s` : "not configured"}
+          />
+        </Box>
+
+        <Stack spacing={1}>
+          <Typography color="text.secondary" fontSize="0.75rem" fontWeight={700} letterSpacing="0.12em" textTransform="uppercase">
+            Active Leases
+          </Typography>
+          <Typography fontWeight={600}>
+            {runtime.activeLeaseCount} active lease{runtime.activeLeaseCount === 1 ? "" : "s"}
+          </Typography>
+          {leasePreview.length > 0 ? (
+            <Stack spacing={1}>
+              {leasePreview.map((lease) => (
+                <LeaseRow key={`${lease.clientKey}-${lease.ipAddress}`} lease={lease} />
+              ))}
+            </Stack>
+          ) : (
+            <Typography color="text.secondary" variant="body2">
+              No active leases yet.
+            </Typography>
+          )}
+        </Stack>
+      </Stack>
+    </Paper>
+  );
+}
+
+function RuntimeField({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <Typography color="text.secondary" fontSize="0.75rem" fontWeight={700} letterSpacing="0.12em" textTransform="uppercase">
+        {label}
+      </Typography>
+      <Typography fontWeight={600}>{value}</Typography>
+    </div>
+  );
+}
+
+function LeaseRow({ lease }: { lease: DhcpLeaseSummary }) {
+  return (
+    <Paper
+      sx={{
+        bgcolor: "rgba(255, 255, 255, 0.84)",
+        p: 1.75,
+        borderRadius: 2.5,
+        boxShadow: "0 8px 18px rgba(39, 65, 82, 0.06)",
+      }}
+    >
+      <Stack spacing={0.25}>
+        <Typography fontWeight={700}>{lease.ipAddress}</Typography>
+        <Typography color="text.secondary" variant="body2">
+          {lease.clientMac}
+        </Typography>
+      </Stack>
+    </Paper>
+  );
+}
+
 export function DhcpGuideCard({ data }: { data: DhcpResponse }) {
   return (
     <Paper component="section" sx={{ p: 4 }}>
@@ -127,9 +237,10 @@ export function DhcpGuideCard({ data }: { data: DhcpResponse }) {
             DHCP Guide
           </Typography>
           <Typography component="h2" variant="h5">
-            Manual settings for {data.selected}
+            DHCP state for {data.selected}
           </Typography>
         </div>
+        <RuntimeStatusCard runtime={data.runtime} />
         <Box
           sx={{
             display: "grid",

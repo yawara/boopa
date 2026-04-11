@@ -26,10 +26,32 @@ export interface DhcpGuidance {
   options: DhcpOptionHint[];
 }
 
+export interface DhcpLeaseSummary {
+  ipAddress: string;
+  clientKey: string;
+  clientMac: string;
+  expiresAtUnixSecs: number;
+}
+
+export interface DhcpRuntimeStatusResponse {
+  enabled: boolean;
+  mode: "disabled" | "authoritative" | string;
+  bindAddress: string;
+  subnet: string | null;
+  poolStart: string | null;
+  poolEnd: string | null;
+  router: string | null;
+  dnsServers: string[];
+  leaseDurationSecs: number | null;
+  activeLeaseCount: number;
+  activeLeases: DhcpLeaseSummary[];
+}
+
 export interface DhcpResponse {
   selected: DistroId;
   bios: DhcpGuidance;
   uefi: DhcpGuidance;
+  runtime: DhcpRuntimeStatusResponse;
 }
 
 export interface CacheEntry {

@@ -138,17 +138,17 @@ pub fn get_recipe(distro: DistroId, mode: BootMode) -> Result<RecipeOutput, Reci
                 asset(
                     "pxelinux",
                     "fedora/bios/pxelinux.0",
-                    "https://download.fedoraproject.org/pub/fedora/linux/releases/41/Server/x86_64/os/images/pxeboot/pxelinux.0",
+                    "https://download.fedoraproject.org/pub/fedora/linux/releases/42/Server/x86_64/os/images/pxeboot/pxelinux.0",
                 ),
                 asset(
                     "kernel",
                     "fedora/bios/kernel",
-                    "https://download.fedoraproject.org/pub/fedora/linux/releases/41/Server/x86_64/os/images/pxeboot/vmlinuz",
+                    "https://download.fedoraproject.org/pub/fedora/linux/releases/42/Server/x86_64/os/images/pxeboot/vmlinuz",
                 ),
                 asset(
                     "initrd",
                     "fedora/bios/initrd",
-                    "https://download.fedoraproject.org/pub/fedora/linux/releases/41/Server/x86_64/os/images/pxeboot/initrd.img",
+                    "https://download.fedoraproject.org/pub/fedora/linux/releases/42/Server/x86_64/os/images/pxeboot/initrd.img",
                 ),
             ],
         ),
@@ -161,17 +161,22 @@ pub fn get_recipe(distro: DistroId, mode: BootMode) -> Result<RecipeOutput, Reci
                 asset(
                     "shim",
                     "fedora/uefi/shimx64.efi",
-                    "https://download.fedoraproject.org/pub/fedora/linux/releases/41/Server/x86_64/os/images/pxeboot/shimx64.efi",
+                    "https://download.fedoraproject.org/pub/fedora/linux/releases/42/Server/x86_64/os/EFI/BOOT/BOOTX64.EFI",
+                ),
+                asset(
+                    "grub",
+                    "fedora/uefi/grubx64.efi",
+                    "https://download.fedoraproject.org/pub/fedora/linux/releases/42/Server/x86_64/os/EFI/BOOT/grubx64.efi",
                 ),
                 asset(
                     "kernel",
                     "fedora/uefi/kernel",
-                    "https://download.fedoraproject.org/pub/fedora/linux/releases/41/Server/x86_64/os/images/pxeboot/vmlinuz",
+                    "https://download.fedoraproject.org/pub/fedora/linux/releases/42/Server/x86_64/os/images/pxeboot/vmlinuz",
                 ),
                 asset(
                     "initrd",
                     "fedora/uefi/initrd",
-                    "https://download.fedoraproject.org/pub/fedora/linux/releases/41/Server/x86_64/os/images/pxeboot/initrd.img",
+                    "https://download.fedoraproject.org/pub/fedora/linux/releases/42/Server/x86_64/os/images/pxeboot/initrd.img",
                 ),
             ],
         ),

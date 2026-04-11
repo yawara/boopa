@@ -6,7 +6,12 @@ use actix_web::{
     http::StatusCode,
     test::{self, TestRequest},
 };
-use boopa::{app_state::AppState, config::Config, http, tftp::resolve_request};
+use boopa::{
+    app_state::AppState,
+    config::{Config, DhcpConfig},
+    http,
+    tftp::resolve_request,
+};
 use boot_recipe::DistroId;
 use tempfile::TempDir;
 
@@ -15,6 +20,7 @@ fn test_config(temp_dir: &TempDir) -> Config {
         api_bind: ([127, 0, 0, 1], 0).into(),
         tftp_bind: ([127, 0, 0, 1], 0).into(),
         tftp_advertise_addr: ([10, 0, 2, 2], 16969).into(),
+        dhcp: DhcpConfig::default(),
         data_dir: temp_dir.path().join("data"),
         frontend_dir: temp_dir.path().join("frontend"),
     }

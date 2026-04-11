@@ -1,6 +1,7 @@
+use std::net::Ipv4Addr;
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{Context, Result, bail};
 use boot_recipe::{BootMode, DhcpGuidance, DistroId, all_distros, get_recipe};
 use image_cache::{CacheEntry, ImageCache};
 
@@ -10,9 +11,10 @@ use crate::autoinstall::{
 };
 use crate::boot_assets::{BootAssetTransport, ResolvedBootAsset};
 use crate::config::Config;
+use crate::dhcp::now_unix_secs;
 use crate::persistence::{
-    PersistedSelection, load_selection, load_ubuntu_autoinstall, save_selection,
-    save_ubuntu_autoinstall,
+    PersistedDhcpLease, PersistedDhcpLeases, PersistedSelection, load_dhcp_leases, load_selection,
+    load_ubuntu_autoinstall, save_dhcp_leases, save_selection, save_ubuntu_autoinstall,
 };
 
 #[derive(Clone)]
@@ -21,6 +23,7 @@ pub struct AppState {
     cache: ImageCache,
     selected_distro: Arc<tokio::sync::RwLock<DistroId>>,
     ubuntu_autoinstall: Arc<tokio::sync::RwLock<PersistedUbuntuAutoinstallConfig>>,
+    dhcp_leases: Arc<tokio::sync::RwLock<PersistedDhcpLeases>>,
 }
 
 impl AppState {
@@ -28,6 +31,12 @@ impl AppState {
         tokio::fs::create_dir_all(&config.data_dir).await?;
         let persisted = load_selection(&config.state_path()).await?;
         let ubuntu_autoinstall = load_ubuntu_autoinstall(&config.ubuntu_autoinstall_path()).await?;
+        let mut dhcp_leases = load_dhcp_leases(&config.dhcp_leases_path()).await?;
+        let now = now_unix_secs();
+        dhcp_leases
+            .leases
+            .retain(|lease| lease.expires_at_unix_secs > now);
+        save_dhcp_leases(&config.dhcp_leases_path(), &dhcp_leases).await?;
         let cache = ImageCache::new(config.cache_dir()).await?;
 
         Ok(Self {
@@ -35,6 +44,7 @@ impl AppState {
             cache,
             selected_distro: Arc::new(tokio::sync::RwLock::new(persisted.selected_distro)),
             ubuntu_autoinstall: Arc::new(tokio::sync::RwLock::new(ubuntu_autoinstall)),
+            dhcp_leases: Arc::new(tokio::sync::RwLock::new(dhcp_leases)),
         })
     }
 
@@ -85,6 +95,7 @@ impl AppState {
             selected,
             bios,
             uefi,
+            runtime: self.dhcp_runtime_status().await,
         })
     }
 
@@ -113,11 +124,19 @@ impl AppState {
         })
     }
 
-    pub async fn refresh_cache(&self, distro: Option<DistroId>) -> Result<CacheResponse> {
+    pub async fn refresh_cache(
+        &self,
+        distro: Option<DistroId>,
+        mode: Option<boot_recipe::BootMode>,
+    ) -> Result<CacheResponse> {
         let selected = distro.unwrap_or(self.selected_distro().await);
+        let entries = match mode {
+            Some(m) => self.cache.refresh_distro_mode(selected, m).await?,
+            None => self.cache.refresh_distro(selected).await?,
+        };
         Ok(CacheResponse {
             selected,
-            entries: self.cache.refresh_distro(selected).await?,
+            entries,
         })
     }
 
@@ -157,6 +176,121 @@ impl AppState {
             transport,
         )
     }
+
+    pub async fn dhcp_runtime_status(&self) -> DhcpRuntimeStatusResponse {
+        let active_leases = self.active_dhcp_leases().await;
+        let authoritative = self.config.dhcp.authoritative_subnet();
+
+        DhcpRuntimeStatusResponse {
+            enabled: self.config.dhcp.enabled(),
+            mode: match self.config.dhcp.mode {
+                crate::config::DhcpMode::Disabled => "disabled".to_string(),
+                crate::config::DhcpMode::Authoritative => "authoritative".to_string(),
+            },
+            bind_address: self.config.dhcp.bind.to_string(),
+            subnet: authoritative.map(|subnet| subnet.subnet.to_string()),
+            pool_start: authoritative.map(|subnet| subnet.pool_start.to_string()),
+            pool_end: authoritative.map(|subnet| subnet.pool_end.to_string()),
+            router: authoritative.and_then(|subnet| subnet.router.map(|ip| ip.to_string())),
+            dns_servers: authoritative
+                .map(|subnet| subnet.dns_servers.iter().map(ToString::to_string).collect())
+                .unwrap_or_default(),
+            lease_duration_secs: authoritative.map(|subnet| subnet.lease_duration_secs),
+            active_lease_count: active_leases.len(),
+            active_leases: active_leases
+                .into_iter()
+                .map(|lease| DhcpLeaseSummary {
+                    ip_address: lease.ip_address.to_string(),
+                    client_key: lease.client_key,
+                    client_mac: lease.client_mac,
+                    expires_at_unix_secs: lease.expires_at_unix_secs,
+                })
+                .collect(),
+        }
+    }
+
+    pub async fn allocate_dhcp_lease(
+        &self,
+        client_key: String,
+        client_mac: String,
+        requested_ip: Option<Ipv4Addr>,
+    ) -> Result<PersistedDhcpLease> {
+        let authoritative = self
+            .config
+            .dhcp
+            .authoritative_subnet()
+            .context("DHCP authoritative mode is not configured")?;
+        let now = now_unix_secs();
+        let mut leases = self.dhcp_leases.write().await;
+        leases
+            .leases
+            .retain(|lease| lease.expires_at_unix_secs > now);
+
+        if let Some(existing) = leases
+            .leases
+            .iter_mut()
+            .find(|lease| lease.client_key == client_key)
+        {
+            existing.client_mac = client_mac;
+            existing.expires_at_unix_secs = now + authoritative.lease_duration_secs as u64;
+            let lease = existing.clone();
+            save_dhcp_leases(&self.config.dhcp_leases_path(), &leases).await?;
+            return Ok(lease);
+        }
+
+        let chosen_ip = requested_ip
+            .filter(|ip| self.ip_is_available(&leases, authoritative, *ip))
+            .unwrap_or_else(|| {
+                first_available_ip(&leases, authoritative).unwrap_or(Ipv4Addr::UNSPECIFIED)
+            });
+        if chosen_ip == Ipv4Addr::UNSPECIFIED {
+            bail!(
+                "no free DHCP leases remain in {}",
+                authoritative.pool_label()
+            );
+        }
+
+        let lease = PersistedDhcpLease {
+            ip_address: chosen_ip,
+            client_key,
+            client_mac,
+            expires_at_unix_secs: now + authoritative.lease_duration_secs as u64,
+        };
+        leases.leases.push(lease.clone());
+        save_dhcp_leases(&self.config.dhcp_leases_path(), &leases).await?;
+        Ok(lease)
+    }
+
+    async fn active_dhcp_leases(&self) -> Vec<PersistedDhcpLease> {
+        let now = now_unix_secs();
+        let leases = self.dhcp_leases.read().await;
+        let mut active = leases
+            .leases
+            .iter()
+            .filter(|lease| lease.expires_at_unix_secs > now)
+            .cloned()
+            .collect::<Vec<_>>();
+        active.sort_by_key(|lease| u32::from(lease.ip_address));
+        active
+    }
+
+    fn ip_is_available(
+        &self,
+        leases: &PersistedDhcpLeases,
+        authoritative: &crate::config::DhcpSubnetConfig,
+        ip: Ipv4Addr,
+    ) -> bool {
+        if !authoritative.subnet.contains(ip) {
+            return false;
+        }
+        if u32::from(ip) < u32::from(authoritative.pool_start)
+            || u32::from(ip) > u32::from(authoritative.pool_end)
+        {
+            return false;
+        }
+
+        !leases.leases.iter().any(|lease| lease.ip_address == ip)
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -182,10 +316,53 @@ pub struct DhcpResponse {
     pub selected: DistroId,
     pub bios: DhcpGuidance,
     pub uefi: DhcpGuidance,
+    pub runtime: DhcpRuntimeStatusResponse,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct CacheResponse {
     pub selected: DistroId,
     pub entries: Vec<CacheEntry>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DhcpLeaseSummary {
+    pub ip_address: String,
+    pub client_key: String,
+    pub client_mac: String,
+    pub expires_at_unix_secs: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DhcpRuntimeStatusResponse {
+    pub enabled: bool,
+    pub mode: String,
+    pub bind_address: String,
+    pub subnet: Option<String>,
+    pub pool_start: Option<String>,
+    pub pool_end: Option<String>,
+    pub router: Option<String>,
+    pub dns_servers: Vec<String>,
+    pub lease_duration_secs: Option<u32>,
+    pub active_lease_count: usize,
+    pub active_leases: Vec<DhcpLeaseSummary>,
+}
+
+fn first_available_ip(
+    leases: &PersistedDhcpLeases,
+    authoritative: &crate::config::DhcpSubnetConfig,
+) -> Option<Ipv4Addr> {
+    let mut candidate = u32::from(authoritative.pool_start);
+    let end = u32::from(authoritative.pool_end);
+    while candidate <= end {
+        let ip = Ipv4Addr::from(candidate);
+        if !leases.leases.iter().any(|lease| lease.ip_address == ip) {
+            return Some(ip);
+        }
+        candidate += 1;
+    }
+
+    None
 }

@@ -54,15 +54,19 @@ async fn get_boot_asset(
         .await
     {
         Some(ResolvedBootAsset::CachedFile { local_path, .. }) => {
+            tracing::info!(requested_path = %path, local_path = %local_path.display(), "http serving cached boot asset");
             let file = NamedFile::open_async(local_path)
                 .await?
                 .set_content_type(APPLICATION_OCTET_STREAM);
             Ok(file.into_response(&request))
         }
         Some(asset) => match asset.read_bytes().await {
-            Ok(bytes) => Ok(HttpResponse::Ok()
-                .content_type(asset.content_type())
-                .body(bytes)),
+            Ok(bytes) => {
+                tracing::info!(requested_path = %path, served_path = %asset.logical_path(), generated = asset.is_generated(), "http serving boot asset");
+                Ok(HttpResponse::Ok()
+                    .content_type(asset.content_type())
+                    .body(bytes))
+            }
             Err(_) => Ok(HttpResponse::NotFound().finish()),
         },
         None => Ok(HttpResponse::NotFound().finish()),

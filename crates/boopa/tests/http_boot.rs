@@ -6,7 +6,11 @@ use actix_web::{
     http::StatusCode,
     test::{self, TestRequest},
 };
-use boopa::{app_state::AppState, config::Config, http};
+use boopa::{
+    app_state::AppState,
+    config::{Config, DhcpConfig},
+    http,
+};
 use boot_recipe::DistroId;
 
 #[actix_web::test]
@@ -24,6 +28,7 @@ async fn serves_boot_asset_when_cached() {
         api_bind: ([127, 0, 0, 1], 0).into(),
         tftp_bind: ([127, 0, 0, 1], 0).into(),
         tftp_advertise_addr: ([127, 0, 0, 1], 6969).into(),
+        dhcp: DhcpConfig::default(),
         data_dir: tempdir.path().join("data"),
         frontend_dir: tempdir.path().join("frontend"),
     };
@@ -49,6 +54,7 @@ async fn serves_generated_grub_config_for_ubuntu_uefi() {
         api_bind: ([127, 0, 0, 1], 18080).into(),
         tftp_bind: ([127, 0, 0, 1], 0).into(),
         tftp_advertise_addr: ([10, 0, 2, 2], 16969).into(),
+        dhcp: DhcpConfig::default(),
         data_dir: tempdir.path().join("data"),
         frontend_dir: tempdir.path().join("frontend"),
     };
@@ -84,6 +90,7 @@ async fn rejects_generated_grub_config_when_selected_distro_is_not_ubuntu() {
         api_bind: ([127, 0, 0, 1], 18080).into(),
         tftp_bind: ([127, 0, 0, 1], 0).into(),
         tftp_advertise_addr: ([10, 0, 2, 2], 16969).into(),
+        dhcp: DhcpConfig::default(),
         data_dir: tempdir.path().join("data"),
         frontend_dir: tempdir.path().join("frontend"),
     };
@@ -121,6 +128,7 @@ async fn serves_cached_live_server_iso_over_http() {
         api_bind: ([127, 0, 0, 1], 18080).into(),
         tftp_bind: ([127, 0, 0, 1], 0).into(),
         tftp_advertise_addr: ([10, 0, 2, 2], 16969).into(),
+        dhcp: DhcpConfig::default(),
         data_dir: tempdir.path().join("data"),
         frontend_dir: tempdir.path().join("frontend"),
     };
@@ -148,6 +156,7 @@ async fn serves_generated_ubuntu_autoinstall_seed_files_over_http() {
         api_bind: ([127, 0, 0, 1], 18080).into(),
         tftp_bind: ([127, 0, 0, 1], 0).into(),
         tftp_advertise_addr: ([10, 0, 2, 2], 16969).into(),
+        dhcp: DhcpConfig::default(),
         data_dir: tempdir.path().join("data"),
         frontend_dir: tempdir.path().join("frontend"),
     };
@@ -189,6 +198,7 @@ async fn generated_ubuntu_autoinstall_seed_reflects_saved_config() {
         api_bind: ([127, 0, 0, 1], 18080).into(),
         tftp_bind: ([127, 0, 0, 1], 0).into(),
         tftp_advertise_addr: ([10, 0, 2, 2], 16969).into(),
+        dhcp: DhcpConfig::default(),
         data_dir: tempdir.path().join("data"),
         frontend_dir: tempdir.path().join("frontend"),
     };
@@ -239,6 +249,7 @@ async fn serves_generated_fedora_kickstart_and_grub_over_http() {
         api_bind: ([127, 0, 0, 1], 18080).into(),
         tftp_bind: ([127, 0, 0, 1], 0).into(),
         tftp_advertise_addr: ([10, 0, 2, 2], 16969).into(),
+        dhcp: DhcpConfig::default(),
         data_dir: tempdir.path().join("data"),
         frontend_dir: tempdir.path().join("frontend"),
     };
@@ -295,6 +306,7 @@ async fn serves_built_frontend_index_for_spa_routes() {
         api_bind: ([127, 0, 0, 1], 0).into(),
         tftp_bind: ([127, 0, 0, 1], 0).into(),
         tftp_advertise_addr: ([10, 0, 2, 2], 16969).into(),
+        dhcp: DhcpConfig::default(),
         data_dir: tempdir.path().join("data"),
         frontend_dir,
     };
