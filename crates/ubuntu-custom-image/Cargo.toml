@@ -1,0 +1,19 @@
+[package]
+name = "ubuntu-custom-image"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+boot-recipe.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+sha2.workspace = true
+tempfile.workspace = true
+tracing.workspace = true
+ubuntu-autoinstall.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

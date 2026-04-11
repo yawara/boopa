@@ -1,6 +1,10 @@
+@import url("https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700&family=M+PLUS+Rounded+1c:wght@400;500;700&display=swap");
+
 :root {
   color-scheme: light;
-  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  --font-body: "M PLUS Rounded 1c", "Segoe UI", sans-serif;
+  --font-display: "Baloo 2", "M PLUS Rounded 1c", sans-serif;
+  font-family: var(--font-body);
   line-height: 1.5;
   font-weight: 400;
   color: #0f1720;
@@ -20,6 +24,7 @@ body {
   min-height: 100vh;
   background:
     radial-gradient(circle at top left, rgba(246, 193, 119, 0.5), transparent 35%),
+    radial-gradient(circle at 85% 12%, rgba(255, 191, 203, 0.22), transparent 18%),
     linear-gradient(160deg, #f7f2ea 0%, #edf3f6 55%, #d7e5ec 100%);
 }
 
@@ -46,11 +51,58 @@ body {
   overflow: hidden;
 }
 
+.hero-panel::before {
+  content: "";
+  position: absolute;
+  inset: auto -5rem -5rem auto;
+  width: 16rem;
+  height: 16rem;
+  border-radius: 999px;
+  background: radial-gradient(circle, rgba(255, 209, 220, 0.36), transparent 68%);
+  pointer-events: none;
+}
+
+.hero-panel::after {
+  content: "";
+  position: absolute;
+  inset: 1.25rem 1.5rem auto auto;
+  width: 5rem;
+  height: 5rem;
+  border-radius: 1.5rem;
+  background:
+    radial-gradient(circle at 35% 35%, rgba(255, 255, 255, 0.78) 0.18rem, transparent 0.2rem),
+    radial-gradient(circle at 70% 62%, rgba(255, 255, 255, 0.6) 0.14rem, transparent 0.16rem),
+    linear-gradient(145deg, rgba(255, 205, 160, 0.5), rgba(255, 174, 126, 0.18));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  opacity: 0.8;
+  pointer-events: none;
+}
+
 .hero-logo img {
   filter: drop-shadow(0 18px 30px rgba(56, 67, 82, 0.12));
 }
 
+.hero-title {
+  font-family: var(--font-display);
+  line-height: 0.92;
+}
+
+.hero-kicker {
+  display: inline-flex;
+  width: fit-content;
+  padding: 0.35rem 0.85rem;
+  border-radius: 999px;
+  background: rgba(255, 253, 249, 0.72);
+  box-shadow: inset 0 0 0 1px rgba(200, 67, 16, 0.08);
+}
+
 @media (max-width: 720px) {
+  .hero-panel::after {
+    inset: 1rem 1rem auto auto;
+    width: 3.75rem;
+    height: 3.75rem;
+  }
+
   .hero-logo img {
     max-width: 100%;
   }

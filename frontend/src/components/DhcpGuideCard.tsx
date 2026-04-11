@@ -1,67 +1,107 @@
 import {
-  Code,
-  Group,
+  Box,
   Paper,
-  SimpleGrid,
   Stack,
-  Text,
-  Title,
-} from "@mantine/core";
+  Typography,
+} from "@mui/material";
 
 import type { DhcpGuidance, DhcpResponse } from "../services/api";
 
 function ModeGuide({ mode, guide }: { mode: string; guide: DhcpGuidance }) {
   return (
-    <Paper bg="rgba(244, 247, 249, 0.9)" p="lg" radius="28px">
-      <Stack gap="md">
-        <Group align="baseline" justify="space-between" wrap="wrap">
-          <Title order={3} size="h4">
+    <Paper sx={{ bgcolor: "rgba(244, 247, 249, 0.9)", p: 3, borderRadius: 3.5 }}>
+      <Stack spacing={3}>
+        <Box
+          sx={{
+            display: "flex",
+            alignItems: "baseline",
+            justifyContent: "space-between",
+            gap: 1,
+            flexWrap: "wrap",
+          }}
+        >
+          <Typography component="h3" variant="h6">
             {mode}
-          </Title>
-          <Text c="slate.7" fw={600}>
+          </Typography>
+          <Typography color="text.secondary" fontWeight={600}>
             {guide.architecture}
-          </Text>
-        </Group>
+          </Typography>
+        </Box>
 
-        <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
+        <Box
+          sx={{
+            display: "grid",
+            gap: 2,
+            gridTemplateColumns: {
+              xs: "minmax(0, 1fr)",
+              sm: "repeat(2, minmax(0, 1fr))",
+            },
+          }}
+        >
           <div>
-            <Text c="slate.6" fw={700} fz="xs" lts="0.12em" tt="uppercase">
+            <Typography
+              color="text.secondary"
+              fontSize="0.75rem"
+              fontWeight={700}
+              letterSpacing="0.12em"
+              textTransform="uppercase"
+            >
               Boot filename
-            </Text>
-            <Text fw={600}>{guide.bootFilename}</Text>
+            </Typography>
+            <Typography fontWeight={600}>{guide.bootFilename}</Typography>
           </div>
           <div>
-            <Text c="slate.6" fw={700} fz="xs" lts="0.12em" tt="uppercase">
+            <Typography
+              color="text.secondary"
+              fontSize="0.75rem"
+              fontWeight={700}
+              letterSpacing="0.12em"
+              textTransform="uppercase"
+            >
               Next server
-            </Text>
-            <Text fw={600}>{guide.nextServer}</Text>
+            </Typography>
+            <Typography fontWeight={600}>{guide.nextServer}</Typography>
           </div>
-        </SimpleGrid>
+        </Box>
 
-        <Stack gap={8}>
+        <Stack spacing={1}>
           {guide.notes.map((note) => (
-            <Text key={note} c="slate.7" size="sm">
+            <Typography key={note} color="text.secondary" variant="body2">
               • {note}
-            </Text>
+            </Typography>
           ))}
         </Stack>
 
-        <Stack gap="sm">
+        <Stack spacing={2}>
           {guide.options.map((option) => (
             <Paper
               key={`${mode}-${option.key}`}
-              bg="rgba(255, 255, 255, 0.86)"
-              p="md"
-              radius="22px"
-              shadow="xs"
-              withBorder={false}
+              sx={{
+                bgcolor: "rgba(255, 255, 255, 0.86)",
+                p: 2,
+                borderRadius: 3,
+                border: "none",
+                boxShadow: "0 10px 24px rgba(39, 65, 82, 0.08)",
+              }}
             >
-              <Stack gap={6}>
-                <Text fw={700}>{option.key}</Text>
-                <Code>{option.value}</Code>
-                <Text c="slate.7" size="sm">
+              <Stack spacing={0.75}>
+                <Typography fontWeight={700}>{option.key}</Typography>
+                <Box
+                  component="code"
+                  sx={{
+                    bgcolor: "rgba(39, 65, 82, 0.08)",
+                    borderRadius: 1.5,
+                    fontFamily: "ui-monospace, SFMono-Regular, SF Mono, Menlo, monospace",
+                    fontSize: "0.85rem",
+                    px: 1,
+                    py: 0.5,
+                  }}
+                >
+                  {option.value}
+                </Box>
+                <Typography color="text.secondary" variant="body2">
                   {option.description}
-                </Text>
+                </Typography>
               </Stack>
             </Paper>
           ))}
@@ -73,20 +113,36 @@ function ModeGuide({ mode, guide }: { mode: string; guide: DhcpGuidance }) {
 
 export function DhcpGuideCard({ data }: { data: DhcpResponse }) {
   return (
-    <Paper component="section" p="xl">
-      <Stack gap="md">
+    <Paper component="section" sx={{ p: 4 }}>
+      <Stack spacing={3}>
         <div>
-          <Text c="boopaAccent.7" fw={700} fz="xs" lts="0.16em" mb={6} tt="uppercase">
+          <Typography
+            color="primary.dark"
+            fontSize="0.75rem"
+            fontWeight={700}
+            letterSpacing="0.16em"
+            mb={0.75}
+            textTransform="uppercase"
+          >
             DHCP Guide
-          </Text>
-          <Title order={2} size="h3">
+          </Typography>
+          <Typography component="h2" variant="h5">
             Manual settings for {data.selected}
-          </Title>
+          </Typography>
         </div>
-        <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md">
-        <ModeGuide mode="BIOS" guide={data.bios} />
-        <ModeGuide mode="UEFI" guide={data.uefi} />
-        </SimpleGrid>
+        <Box
+          sx={{
+            display: "grid",
+            gap: 2,
+            gridTemplateColumns: {
+              xs: "minmax(0, 1fr)",
+              md: "repeat(2, minmax(0, 1fr))",
+            },
+          }}
+        >
+          <ModeGuide mode="BIOS" guide={data.bios} />
+          <ModeGuide mode="UEFI" guide={data.uefi} />
+        </Box>
       </Stack>
     </Paper>
   );

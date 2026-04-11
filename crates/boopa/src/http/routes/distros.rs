@@ -11,6 +11,11 @@ pub struct SelectionRequest {
     pub distro: DistroId,
 }
 
+pub fn configure(cfg: &mut web::ServiceConfig) {
+    cfg.route("/api/distros", web::get().to(get_distros))
+        .route("/api/selection", web::put().to(put_selection));
+}
+
 pub async fn get_distros(state: web::Data<Arc<AppState>>) -> HttpResponse {
     HttpResponse::Ok().json(state.supported_distros().await)
 }

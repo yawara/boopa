@@ -11,6 +11,10 @@ pub struct DhcpQuery {
     pub distro: Option<DistroId>,
 }
 
+pub fn configure(cfg: &mut web::ServiceConfig) {
+    cfg.route("/api/dhcp", web::get().to(get_dhcp));
+}
+
 pub async fn get_dhcp(
     state: web::Data<Arc<AppState>>,
     query: web::Query<DhcpQuery>,

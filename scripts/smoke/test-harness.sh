@@ -110,6 +110,132 @@ assert_missing "${GRUB_CFG_ALIAS_NESTED}"
 assert_missing "${KERNEL_PATH}"
 assert_missing "${INITRD_PATH}"
 
+CUSTOM_BASE_ISO="${TMP_DIR}/custom/base.iso"
+CUSTOM_MANIFEST="${TMP_DIR}/custom/manifest.yaml"
+CUSTOM_EXISTING_OUTPUT_ISO="${TMP_DIR}/custom/existing-custom.iso"
+mkdir -p "${TMP_DIR}/custom"
+printf 'base-iso-bytes\n' >"${CUSTOM_BASE_ISO}"
+cat >"${CUSTOM_MANIFEST}" <<'EOF'
+packages:
+  - openssh-server
+  - git
+EOF
+printf 'custom-iso-bytes\n' >"${CUSTOM_EXISTING_OUTPUT_ISO}"
+
+SMOKE_DRY_RUN=1 \
+SMOKE_WORK_ROOT="${TMP_DIR}/work" \
+SMOKE_TIMESTAMP="20260405T170100Z" \
+CUSTOM_IMAGE_BASE_ISO="${CUSTOM_BASE_ISO}" \
+CUSTOM_IMAGE_MANIFEST="${CUSTOM_MANIFEST}" \
+CUSTOM_IMAGE_OUTPUT_ISO="${CUSTOM_EXISTING_OUTPUT_ISO}" \
+"${REPO_ROOT}/scripts/smoke/boot-ubuntu-custom-image.sh" >"${TMP_DIR}/custom-existing.log"
+
+CUSTOM_EXISTING_RUN_DIR="${TMP_DIR}/work/ubuntu-custom-image-20260405T170100Z"
+CUSTOM_EXISTING_QEMU_CMD_LOG="${CUSTOM_EXISTING_RUN_DIR}/logs/qemu-command.txt"
+CUSTOM_EXISTING_BUILD_CMD_LOG="${CUSTOM_EXISTING_RUN_DIR}/logs/custom-image-build-command.txt"
+CUSTOM_EXISTING_BACKEND_LOG="${CUSTOM_EXISTING_RUN_DIR}/logs/backend.log"
+
+[[ -f "${CUSTOM_EXISTING_QEMU_CMD_LOG}" ]] || { echo "expected custom-image qemu command log at ${CUSTOM_EXISTING_QEMU_CMD_LOG}" >&2; exit 1; }
+assert_missing "${CUSTOM_EXISTING_BUILD_CMD_LOG}"
+assert_missing "${CUSTOM_EXISTING_BACKEND_LOG}"
+assert_contains "order=d\\,menu=off" "${CUSTOM_EXISTING_QEMU_CMD_LOG}"
+assert_contains "file=${CUSTOM_EXISTING_OUTPUT_ISO}\\,media=cdrom\\,if=ide\\,index=0" "${CUSTOM_EXISTING_QEMU_CMD_LOG}"
+assert_not_contains "file=fat:rw:" "${CUSTOM_EXISTING_QEMU_CMD_LOG}"
+assert_not_contains "http://" "${CUSTOM_EXISTING_QEMU_CMD_LOG}"
+assert_not_contains "/boot/ubuntu/uefi/" "${CUSTOM_EXISTING_QEMU_CMD_LOG}"
+
+CUSTOM_MISSING_OUTPUT_ISO="${TMP_DIR}/custom/generated/custom.iso"
+assert_missing "${CUSTOM_MISSING_OUTPUT_ISO}"
+
+SMOKE_DRY_RUN=1 \
+SMOKE_WORK_ROOT="${TMP_DIR}/work" \
+SMOKE_TIMESTAMP="20260405T170200Z" \
+CUSTOM_IMAGE_BASE_ISO="${CUSTOM_BASE_ISO}" \
+CUSTOM_IMAGE_MANIFEST="${CUSTOM_MANIFEST}" \
+CUSTOM_IMAGE_OUTPUT_ISO="${CUSTOM_MISSING_OUTPUT_ISO}" \
+"${REPO_ROOT}/scripts/smoke/boot-ubuntu-custom-image.sh" >"${TMP_DIR}/custom-build.log"
+
+CUSTOM_BUILD_RUN_DIR="${TMP_DIR}/work/ubuntu-custom-image-20260405T170200Z"
+CUSTOM_BUILD_QEMU_CMD_LOG="${CUSTOM_BUILD_RUN_DIR}/logs/qemu-command.txt"
+CUSTOM_BUILD_CMD_LOG="${CUSTOM_BUILD_RUN_DIR}/logs/custom-image-build-command.txt"
+CUSTOM_BUILD_BACKEND_LOG="${CUSTOM_BUILD_RUN_DIR}/logs/backend.log"
+
+[[ -f "${CUSTOM_BUILD_QEMU_CMD_LOG}" ]] || { echo "expected custom-image qemu command log at ${CUSTOM_BUILD_QEMU_CMD_LOG}" >&2; exit 1; }
+[[ -f "${CUSTOM_BUILD_CMD_LOG}" ]] || { echo "expected custom-image build command log at ${CUSTOM_BUILD_CMD_LOG}" >&2; exit 1; }
+assert_missing "${CUSTOM_BUILD_BACKEND_LOG}"
+assert_missing "${CUSTOM_MISSING_OUTPUT_ISO}"
+assert_contains "cargo run -p ubuntu-custom-image -- build --base-iso ${CUSTOM_BASE_ISO} --manifest ${CUSTOM_MANIFEST} --output ${CUSTOM_MISSING_OUTPUT_ISO}" "${CUSTOM_BUILD_CMD_LOG}"
+assert_contains "order=d\\,menu=off" "${CUSTOM_BUILD_QEMU_CMD_LOG}"
+assert_contains "file=${CUSTOM_MISSING_OUTPUT_ISO}\\,media=cdrom\\,if=ide\\,index=0" "${CUSTOM_BUILD_QEMU_CMD_LOG}"
+assert_not_contains "file=fat:rw:" "${CUSTOM_BUILD_QEMU_CMD_LOG}"
+assert_not_contains "http://" "${CUSTOM_BUILD_QEMU_CMD_LOG}"
+
+CUSTOM_NO_BACKEND_RUN_DIR="${TMP_DIR}/work/ubuntu-custom-image-20260405T170300Z"
+CUSTOM_NO_BACKEND_SENTINEL="${TMP_DIR}/custom-no-backend.log"
+
+(
+  set -euo pipefail
+  # shellcheck source=scripts/smoke/lib.sh
+  source "${REPO_ROOT}/scripts/smoke/lib.sh"
+
+  smoke_preflight() {
+    QEMU_FIRMWARE_CODE="${TMP_DIR}/custom-firmware-code.fd"
+    QEMU_FIRMWARE_VARS="${TMP_DIR}/custom-firmware-vars.fd"
+    printf 'code\n' >"${QEMU_FIRMWARE_CODE}"
+    printf 'vars\n' >"${QEMU_FIRMWARE_VARS}"
+  }
+
+  smoke_prepare_firmware() {
+    SMOKE_QEMU_VARS_COPY="${CUSTOM_NO_BACKEND_RUN_DIR}/edk2-vars.fd"
+    mkdir -p "$(dirname "${SMOKE_QEMU_VARS_COPY}")"
+    printf 'vars\n' >"${SMOKE_QEMU_VARS_COPY}"
+  }
+
+  smoke_prepare_system_disk() {
+    mkdir -p "$(dirname "${SMOKE_SYSTEM_DISK_PATH}")"
+    printf 'qcow2-placeholder\n' >"${SMOKE_SYSTEM_DISK_PATH}"
+  }
+
+  smoke_start_backend() {
+    printf 'start_backend\n' >>"${CUSTOM_NO_BACKEND_SENTINEL}"
+  }
+
+  smoke_wait_for_backend() {
+    printf 'wait_for_backend\n' >>"${CUSTOM_NO_BACKEND_SENTINEL}"
+  }
+
+  smoke_refresh_backend_assets() {
+    printf 'refresh_backend_assets\n' >>"${CUSTOM_NO_BACKEND_SENTINEL}"
+  }
+
+  smoke_sync_boot_root_from_backend() {
+    printf 'sync_boot_root_from_backend\n' >>"${CUSTOM_NO_BACKEND_SENTINEL}"
+  }
+
+  smoke_probe_assets() {
+    printf 'probe_assets\n' >>"${CUSTOM_NO_BACKEND_SENTINEL}"
+  }
+
+  smoke_start_qemu() {
+    printf 'start_qemu\n' >>"${TMP_DIR}/custom-flow.log"
+  }
+
+  smoke_wait_for_markers() {
+    printf 'wait_for_markers\n' >>"${TMP_DIR}/custom-flow.log"
+  }
+
+  SMOKE_LANE=custom-image
+  SMOKE_WORK_ROOT="${TMP_DIR}/work"
+  SMOKE_TIMESTAMP="20260405T170300Z"
+  SMOKE_INTERACTIVE=0
+  CUSTOM_IMAGE_BASE_ISO="${CUSTOM_BASE_ISO}"
+  CUSTOM_IMAGE_MANIFEST="${CUSTOM_MANIFEST}"
+  CUSTOM_IMAGE_OUTPUT_ISO="${CUSTOM_EXISTING_OUTPUT_ISO}"
+  smoke_main ubuntu uefi
+)
+
+assert_missing "${CUSTOM_NO_BACKEND_SENTINEL}"
+
 SYNC_RUN_DIR="${TMP_DIR}/sync/ubuntu-uefi-20260405T170500Z"
 SYNC_BOOT_ROOT="${SYNC_RUN_DIR}/boot-root"
 SYNC_GRUB_CFG="${SYNC_BOOT_ROOT}/grub/grub.cfg"

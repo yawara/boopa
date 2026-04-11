@@ -4,19 +4,17 @@ import {
   Box,
   Button,
   Checkbox,
+  FormControl,
+  FormControlLabel,
+  InputLabel,
   NativeSelect,
   Paper,
-  PasswordInput,
-  SimpleGrid,
   Stack,
-  Text,
-  TextInput,
-  Textarea,
-  Title,
-} from "@mantine/core";
+  TextField,
+  Typography,
+} from "@mui/material";
 
 import type {
-  UbuntuAutoinstallConfig,
   UbuntuAutoinstallConfigUpdate,
   UbuntuAutoinstallResponse,
   ValidationErrorResponse,
@@ -60,8 +58,8 @@ export function AutoinstallCard() {
 
   if (query.isLoading || !form || !query.data) {
     return (
-      <Paper component="section" p="xl">
-        <Text size="lg">Loading autoinstall config...</Text>
+      <Paper component="section" sx={{ p: 4 }}>
+        <Typography variant="h6">Loading autoinstall config...</Typography>
       </Paper>
     );
   }
@@ -104,153 +102,213 @@ export function AutoinstallCard() {
   }
 
   return (
-    <Paper component="section" p="xl">
-      <Stack gap="md">
+    <Paper component="section" sx={{ p: 4 }}>
+      <Stack spacing={3}>
         <div>
-          <Text c="boopaAccent.7" fw={700} fz="xs" lts="0.16em" mb={6} tt="uppercase">
+          <Typography
+            color="primary.dark"
+            fontSize="0.75rem"
+            fontWeight={700}
+            letterSpacing="0.16em"
+            mb={0.75}
+            textTransform="uppercase"
+          >
             Autoinstall
-          </Text>
-          <Title order={2} size="h3">
+          </Typography>
+          <Typography component="h2" variant="h5">
             Ubuntu autoinstall defaults
-          </Title>
-          <Text c="slate.7" mt="xs">
+          </Typography>
+          <Typography color="text.secondary" mt={1}>
             Save the basic install options the backend will render into
-            <Box component="span" fw={700}>
+            <Box component="span" sx={{ fontWeight: 700 }}>
               {" "}
               `/boot/ubuntu/uefi/autoinstall/user-data`
             </Box>
             .
-          </Text>
+          </Typography>
         </div>
 
-        {serverMessage ? <Alert color="red">{serverMessage}</Alert> : null}
+        {serverMessage ? <Alert severity="error">{serverMessage}</Alert> : null}
 
-        <SimpleGrid cols={{ base: 1, xl: 2 }} spacing="lg">
-          <Paper bg="rgba(244, 247, 249, 0.9)" p="lg" radius="28px">
-            <Stack gap="md">
-              <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
-                <TextInput
+        <Box
+          sx={{
+            display: "grid",
+            gap: 3,
+            gridTemplateColumns: {
+              xs: "minmax(0, 1fr)",
+              xl: "repeat(2, minmax(0, 1fr))",
+            },
+          }}
+        >
+          <Paper sx={{ bgcolor: "rgba(244, 247, 249, 0.9)", p: 3, borderRadius: 3.5 }}>
+            <Stack spacing={3}>
+              <Box
+                sx={{
+                  display: "grid",
+                  gap: 2,
+                  gridTemplateColumns: {
+                    xs: "minmax(0, 1fr)",
+                    sm: "repeat(2, minmax(0, 1fr))",
+                  },
+                }}
+              >
+                <TextField
                   label="Hostname"
                   value={form.hostname}
-                  error={fieldErrors.hostname}
+                  error={Boolean(fieldErrors.hostname)}
+                  helperText={fieldErrors.hostname}
                   onChange={(event) => updateField("hostname", event.currentTarget.value)}
                 />
-                <TextInput
+                <TextField
                   label="Username"
                   value={form.username}
-                  error={fieldErrors.username}
+                  error={Boolean(fieldErrors.username)}
+                  helperText={fieldErrors.username}
                   onChange={(event) => updateField("username", event.currentTarget.value)}
                 />
-                <PasswordInput
+                <TextField
                   label="Password"
+                  type="password"
                   value={form.password}
-                  error={fieldErrors.password}
-                  onChange={(event) => updateField("password", event.currentTarget.value)}
-                  description={
-                    query.data.hasPassword
+                  error={Boolean(fieldErrors.password)}
+                  helperText={
+                    fieldErrors.password ??
+                    (query.data.hasPassword
                       ? "Leave blank to keep the saved password hash."
-                      : "Required for the first save."
+                      : "Required for the first save.")
                   }
+                  onChange={(event) => updateField("password", event.currentTarget.value)}
                 />
-                <PasswordInput
+                <TextField
                   label="Confirm password"
+                  type="password"
                   value={form.confirmPassword}
-                  error={fieldErrors.confirmPassword}
+                  error={Boolean(fieldErrors.confirmPassword)}
+                  helperText={fieldErrors.confirmPassword}
                   onChange={(event) => updateField("confirmPassword", event.currentTarget.value)}
                 />
-                <TextInput
+                <TextField
                   label="Locale"
                   value={form.locale}
-                  error={fieldErrors.locale}
+                  error={Boolean(fieldErrors.locale)}
+                  helperText={fieldErrors.locale}
                   onChange={(event) => updateField("locale", event.currentTarget.value)}
                 />
-                <TextInput
+                <TextField
                   label="Keyboard layout"
                   value={form.keyboardLayout}
-                  error={fieldErrors.keyboardLayout}
+                  error={Boolean(fieldErrors.keyboardLayout)}
+                  helperText={fieldErrors.keyboardLayout}
                   onChange={(event) => updateField("keyboardLayout", event.currentTarget.value)}
                 />
-                <TextInput
+                <TextField
                   label="Timezone"
                   value={form.timezone}
-                  error={fieldErrors.timezone}
+                  error={Boolean(fieldErrors.timezone)}
+                  helperText={fieldErrors.timezone}
                   onChange={(event) => updateField("timezone", event.currentTarget.value)}
                 />
-                <NativeSelect
-                  label="Storage layout"
-                  value={form.storageLayout}
-                  data={[
-                    { value: "direct", label: "Direct" },
-                    { value: "lvm", label: "LVM" },
-                  ]}
-                  onChange={(event) =>
-                    updateField("storageLayout", event.currentTarget.value as "direct" | "lvm")
-                  }
-                />
-              </SimpleGrid>
+                <FormControl fullWidth variant="standard">
+                  <InputLabel shrink htmlFor="storage-layout-select">
+                    Storage layout
+                  </InputLabel>
+                  <NativeSelect
+                    value={form.storageLayout}
+                    onChange={(event) =>
+                      updateField("storageLayout", event.currentTarget.value as "direct" | "lvm")
+                    }
+                    inputProps={{ id: "storage-layout-select" }}
+                  >
+                    <option value="direct">Direct</option>
+                    <option value="lvm">LVM</option>
+                  </NativeSelect>
+                </FormControl>
+              </Box>
 
-              <Checkbox
-                label="Install OpenSSH server"
-                checked={form.installOpenSsh}
-                onChange={(event) => updateField("installOpenSsh", event.currentTarget.checked)}
-              />
-              <Checkbox
-                label="Allow password authentication"
-                checked={form.allowPasswordAuth}
-                onChange={(event) =>
-                  updateField("allowPasswordAuth", event.currentTarget.checked)
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={form.installOpenSsh}
+                    onChange={(event) => updateField("installOpenSsh", event.currentTarget.checked)}
+                  />
                 }
+                label="Install OpenSSH server"
+              />
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={form.allowPasswordAuth}
+                    onChange={(event) =>
+                      updateField("allowPasswordAuth", event.currentTarget.checked)
+                    }
+                  />
+                }
+                label="Allow password authentication"
               />
 
-              <Textarea
+              <TextField
                 label="Authorized keys"
-                description="One SSH public key per line."
+                helperText={fieldErrors.authorizedKeys ?? "One SSH public key per line."}
+                multiline
                 minRows={4}
                 value={form.authorizedKeysText}
-                error={fieldErrors.authorizedKeys}
+                error={Boolean(fieldErrors.authorizedKeys)}
                 onChange={(event) => updateField("authorizedKeysText", event.currentTarget.value)}
               />
-              <Textarea
+              <TextField
                 label="Packages"
-                description="One apt package name per line."
+                helperText={fieldErrors.packages ?? "One apt package name per line."}
+                multiline
                 minRows={4}
                 value={form.packagesText}
-                error={fieldErrors.packages}
+                error={Boolean(fieldErrors.packages)}
                 onChange={(event) => updateField("packagesText", event.currentTarget.value)}
               />
 
               <Button
                 disabled={saveDisabled}
-                loading={saveState.isLoading}
-                variant="gradient"
+                variant="contained"
                 onClick={() => {
                   void handleSave();
                 }}
               >
-                Save Autoinstall Config
+                {saveState.isLoading ? "Saving..." : "Save Autoinstall Config"}
               </Button>
             </Stack>
           </Paper>
 
-          <Paper bg="rgba(16, 24, 32, 0.96)" c="white" p="lg" radius="28px">
-            <Stack gap="sm">
+          <Paper
+            sx={{
+              bgcolor: "rgba(16, 24, 32, 0.96)",
+              color: "common.white",
+              p: 3,
+              borderRadius: 3.5,
+            }}
+          >
+            <Stack spacing={1.5}>
               <div>
-                <Text c="boopaAccent.2" fw={700} fz="xs" lts="0.16em" tt="uppercase">
+                <Typography
+                  color="primary.light"
+                  fontSize="0.75rem"
+                  fontWeight={700}
+                  letterSpacing="0.16em"
+                  textTransform="uppercase"
+                >
                   YAML Preview
-                </Text>
-                <Title order={3} size="h4" c="white" mt={6}>
+                </Typography>
+                <Typography color="common.white" component="h3" mt={0.75} variant="h6">
                   Rendered user-data
-                </Title>
+                </Typography>
               </div>
-              <Text c="rgba(255,255,255,0.72)" size="sm">
+              <Typography color="rgba(255,255,255,0.72)" variant="body2">
                 This preview reflects the last config saved to the backend.
-              </Text>
+              </Typography>
               <Box
                 component="pre"
-                bg="rgba(255,255,255,0.04)"
-                c="white"
-                p="md"
-                style={{
+                sx={{
+                  bgcolor: "rgba(255,255,255,0.04)",
+                  color: "common.white",
+                  p: 2,
                   fontFamily: "ui-monospace, SFMono-Regular, SF Mono, Menlo, monospace",
                   fontSize: "0.85rem",
                   lineHeight: 1.55,
@@ -262,7 +320,7 @@ export function AutoinstallCard() {
               </Box>
             </Stack>
           </Paper>
-        </SimpleGrid>
+        </Box>
       </Stack>
     </Paper>
   );

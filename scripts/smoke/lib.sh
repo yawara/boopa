@@ -78,6 +78,7 @@ smoke_configure_paths() {
   local repo_root="$1"
   local distro="$2"
   local mode="$3"
+  local target_name="${SMOKE_TARGET_NAME:-${distro}-${mode}}"
 
   SMOKE_QEMU_BIN="${QEMU_BIN:-qemu-system-x86_64}"
   SMOKE_RAM_MB="${RAM_MB:-8192}"
@@ -85,12 +86,15 @@ smoke_configure_paths() {
   SMOKE_TIMEOUT_SECS="${SMOKE_TIMEOUT_SECS:-180}"
   SMOKE_WORK_ROOT="${SMOKE_WORK_ROOT:-${repo_root}/var/smoke-work}"
   SMOKE_TIMESTAMP="${SMOKE_TIMESTAMP:-$(date -u +%Y%m%dT%H%M%SZ)}"
-  SMOKE_RUN_DIR="${SMOKE_WORK_ROOT}/${distro}-${mode}-${SMOKE_TIMESTAMP}"
+  SMOKE_TARGET_NAME="${target_name}"
+  SMOKE_RUN_DIR="${SMOKE_WORK_ROOT}/${SMOKE_TARGET_NAME}-${SMOKE_TIMESTAMP}"
   SMOKE_SERVICE_DATA_DIR="${SMOKE_RUN_DIR}/service-data"
   SMOKE_TFTP_ROOT="${SMOKE_RUN_DIR}/boot-root"
   SMOKE_LOG_DIR="${SMOKE_RUN_DIR}/logs"
   SMOKE_SERIAL_LOG="${SMOKE_LOG_DIR}/serial.log"
   SMOKE_BACKEND_LOG="${SMOKE_LOG_DIR}/backend.log"
+  SMOKE_CUSTOM_IMAGE_BUILD_LOG="${SMOKE_LOG_DIR}/custom-image-build.log"
+  SMOKE_CUSTOM_IMAGE_BUILD_CMD_LOG="${SMOKE_LOG_DIR}/custom-image-build-command.txt"
   SMOKE_DEBUG_LOG="${SMOKE_LOG_DIR}/debugcon.log"
   SMOKE_QEMU_LOG="${SMOKE_LOG_DIR}/qemu.log"
   SMOKE_QEMU_CMD_LOG="${SMOKE_LOG_DIR}/qemu-command.txt"
@@ -119,19 +123,18 @@ smoke_configure_paths() {
 }
 
 smoke_prepare_workspace() {
-  mkdir -p \
-    "${SMOKE_RUN_DIR}" \
-    "${SMOKE_SERVICE_DATA_DIR}" \
-    "${SMOKE_TFTP_ROOT}/ubuntu/uefi" \
-    "${SMOKE_TFTP_ROOT}/EFI/BOOT" \
-    "${SMOKE_LOG_DIR}"
+  mkdir -p "${SMOKE_RUN_DIR}" "${SMOKE_SERVICE_DATA_DIR}" "${SMOKE_LOG_DIR}"
 
-  if [[ "${SMOKE_SERVICE_DATA_DIR}/cache" == "${SMOKE_SOURCE_DATA_DIR}/cache" ]]; then
-    mkdir -p "${SMOKE_SERVICE_DATA_DIR}/cache"
-  else
-    mkdir -p "${SMOKE_SOURCE_DATA_DIR}/cache"
-    ln -s "${SMOKE_SOURCE_DATA_DIR}/cache" "${SMOKE_SERVICE_DATA_DIR}/cache"
-    smoke_log "linked smoke cache ${SMOKE_SERVICE_DATA_DIR}/cache -> ${SMOKE_SOURCE_DATA_DIR}/cache"
+  if [[ "${SMOKE_LANE:-backend}" == "backend" ]]; then
+    mkdir -p "${SMOKE_TFTP_ROOT}/ubuntu/uefi" "${SMOKE_TFTP_ROOT}/EFI/BOOT"
+
+    if [[ "${SMOKE_SERVICE_DATA_DIR}/cache" == "${SMOKE_SOURCE_DATA_DIR}/cache" ]]; then
+      mkdir -p "${SMOKE_SERVICE_DATA_DIR}/cache"
+    else
+      mkdir -p "${SMOKE_SOURCE_DATA_DIR}/cache"
+      ln -s "${SMOKE_SOURCE_DATA_DIR}/cache" "${SMOKE_SERVICE_DATA_DIR}/cache"
+      smoke_log "linked smoke cache ${SMOKE_SERVICE_DATA_DIR}/cache -> ${SMOKE_SOURCE_DATA_DIR}/cache"
+    fi
   fi
 }
 
@@ -196,8 +199,13 @@ smoke_seed_dry_run_bootloader() {
 smoke_preflight() {
   smoke_require_command "${SMOKE_QEMU_BIN}"
   smoke_require_command qemu-img
-  smoke_require_command curl
-  smoke_require_command cargo
+
+  if [[ "${SMOKE_LANE:-backend}" == "backend" ]]; then
+    smoke_require_command cargo
+    smoke_require_command curl
+  elif [[ ! -f "${CUSTOM_IMAGE_OUTPUT_ISO:-}" ]]; then
+    smoke_require_command cargo
+  fi
 
   if [[ -z "${QEMU_FIRMWARE_CODE:-}" ]]; then
     QEMU_FIRMWARE_CODE="$(smoke_resolve_firmware_file "edk2-x86_64-code.fd")"
@@ -221,7 +229,11 @@ smoke_cleanup() {
   fi
   if [[ "${exit_code}" -ne 0 ]]; then
     smoke_log_file_tail "serial" "${SMOKE_SERIAL_LOG}" 30
-    smoke_log_file_tail "backend" "${SMOKE_BACKEND_LOG}" 30
+    if [[ "${SMOKE_LANE:-backend}" == "backend" ]]; then
+      smoke_log_file_tail "backend" "${SMOKE_BACKEND_LOG}" 30
+    else
+      smoke_log_file_tail "custom image build" "${SMOKE_CUSTOM_IMAGE_BUILD_LOG}" 30
+    fi
     smoke_log_file_tail "qemu" "${SMOKE_QEMU_LOG}" 30
     echo "smoke logs preserved at ${SMOKE_RUN_DIR}" >&2
   fi
@@ -305,12 +317,89 @@ smoke_probe_assets() {
 }
 
 smoke_write_qemu_command_log() {
-  local qemu_cmd=("$@")
-  printf '%q ' "${qemu_cmd[@]}" >"${SMOKE_QEMU_CMD_LOG}"
-  printf '\n' >>"${SMOKE_QEMU_CMD_LOG}"
+  smoke_write_command_log "${SMOKE_QEMU_CMD_LOG}" "$@"
+}
+
+smoke_write_command_log() {
+  local log_path="$1"
+  shift
+  local cmd=("$@")
+  printf '%q ' "${cmd[@]}" >"${log_path}"
+  printf '\n' >>"${log_path}"
+}
+
+smoke_require_existing_file() {
+  local label="$1"
+  local file_path="$2"
+
+  [[ -n "${file_path}" ]] || smoke_die "${label} must be set"
+  [[ -f "${file_path}" ]] || smoke_die "${label} not found: ${file_path}"
+}
+
+smoke_prepare_custom_image_iso() {
+  smoke_require_existing_file "CUSTOM_IMAGE_BASE_ISO" "${CUSTOM_IMAGE_BASE_ISO:-}"
+  smoke_require_existing_file "CUSTOM_IMAGE_MANIFEST" "${CUSTOM_IMAGE_MANIFEST:-}"
+
+  SMOKE_CUSTOM_IMAGE_OUTPUT_ISO="${CUSTOM_IMAGE_OUTPUT_ISO:-}"
+  [[ -n "${SMOKE_CUSTOM_IMAGE_OUTPUT_ISO}" ]] || smoke_die "CUSTOM_IMAGE_OUTPUT_ISO must be set"
+
+  if [[ -f "${SMOKE_CUSTOM_IMAGE_OUTPUT_ISO}" ]]; then
+    smoke_log "using existing custom image ISO ${SMOKE_CUSTOM_IMAGE_OUTPUT_ISO}"
+    return 0
+  fi
+
+  mkdir -p "$(dirname "${SMOKE_CUSTOM_IMAGE_OUTPUT_ISO}")"
+
+  local build_cmd=(
+    cargo
+    run
+    -p
+    ubuntu-custom-image
+    --
+    build
+    --base-iso
+    "${CUSTOM_IMAGE_BASE_ISO}"
+    --manifest
+    "${CUSTOM_IMAGE_MANIFEST}"
+    --output
+    "${SMOKE_CUSTOM_IMAGE_OUTPUT_ISO}"
+  )
+
+  smoke_write_command_log "${SMOKE_CUSTOM_IMAGE_BUILD_CMD_LOG}" "${build_cmd[@]}"
+
+  if [[ "${SMOKE_DRY_RUN}" == "1" ]]; then
+    smoke_log "dry-run custom image build command prepared at ${SMOKE_CUSTOM_IMAGE_BUILD_CMD_LOG}"
+    return 0
+  fi
+
+  smoke_log "building custom image ISO at ${SMOKE_CUSTOM_IMAGE_OUTPUT_ISO}"
+  (
+    cd "${SMOKE_REPO_ROOT}"
+    "${build_cmd[@]}"
+  ) >"${SMOKE_CUSTOM_IMAGE_BUILD_LOG}" 2>&1
+
+  [[ -f "${SMOKE_CUSTOM_IMAGE_OUTPUT_ISO}" ]] || smoke_die "custom image build did not create ${SMOKE_CUSTOM_IMAGE_OUTPUT_ISO}"
+}
+
+smoke_boot_media_args() {
+  if [[ "${SMOKE_LANE:-backend}" == "custom-image" ]]; then
+    printf '%s\0' \
+      "-boot" "order=d,menu=off" \
+      "-drive" "file=${SMOKE_CUSTOM_IMAGE_OUTPUT_ISO},media=cdrom,if=ide,index=0"
+    return 0
+  fi
+
+  printf '%s\0' \
+    "-boot" "order=c,menu=off" \
+    "-drive" "file=fat:rw:${SMOKE_TFTP_ROOT},format=raw,if=ide,index=0"
 }
 
 smoke_start_qemu() {
+  local boot_media=()
+  while IFS= read -r -d '' boot_arg; do
+    boot_media+=("${boot_arg}")
+  done < <(smoke_boot_media_args)
+
   local qemu_cmd=(
     "${SMOKE_QEMU_BIN}"
     -machine q35
@@ -321,10 +410,9 @@ smoke_start_qemu() {
     -serial "file:${SMOKE_SERIAL_LOG}"
     -debugcon "file:${SMOKE_DEBUG_LOG}"
     -global isa-debugcon.iobase=0x402
-    -boot order=c,menu=off
     -drive "if=pflash,format=raw,readonly=on,file=${QEMU_FIRMWARE_CODE}"
     -drive "if=pflash,format=raw,file=${SMOKE_QEMU_VARS_COPY}"
-    -drive "file=fat:rw:${SMOKE_TFTP_ROOT},format=raw,if=ide,index=0"
+    "${boot_media[@]}"
     -drive "file=${SMOKE_SYSTEM_DISK_PATH},format=qcow2,if=virtio"
     -netdev "user,id=net0,ipv6=off"
     -device "e1000,netdev=net0"
@@ -342,10 +430,9 @@ smoke_start_qemu() {
       -serial stdio
       -debugcon "file:${SMOKE_DEBUG_LOG}"
       -global isa-debugcon.iobase=0x402
-      -boot order=c,menu=off
       -drive "if=pflash,format=raw,readonly=on,file=${QEMU_FIRMWARE_CODE}"
       -drive "if=pflash,format=raw,file=${SMOKE_QEMU_VARS_COPY}"
-      -drive "file=fat:rw:${SMOKE_TFTP_ROOT},format=raw,if=ide,index=0"
+      "${boot_media[@]}"
       -drive "file=${SMOKE_SYSTEM_DISK_PATH},format=qcow2,if=virtio"
       -netdev "user,id=net0,ipv6=off"
       -device "e1000,netdev=net0"
@@ -384,7 +471,7 @@ smoke_verify_markers_post_run() {
     return 0
   fi
 
-  smoke_die "qemu session ended without matching success markers; inspect ${SMOKE_SERIAL_LOG} and ${SMOKE_BACKEND_LOG}"
+  smoke_die "qemu session ended without matching success markers; inspect ${SMOKE_SERIAL_LOG} and ${SMOKE_QEMU_LOG}"
 }
 
 smoke_wait_for_markers() {
@@ -427,10 +514,28 @@ smoke_wait_for_markers() {
     sleep 2
   done
 
-  smoke_die "no success markers matched before timeout; inspect ${SMOKE_SERIAL_LOG} and ${SMOKE_BACKEND_LOG}"
+  smoke_die "no success markers matched before timeout; inspect ${SMOKE_SERIAL_LOG} and ${SMOKE_QEMU_LOG}"
 }
 
 smoke_print_summary() {
+  if [[ "${SMOKE_LANE:-backend}" == "custom-image" ]]; then
+    cat <<EOF
+Smoke target: ${SMOKE_TARGET_NAME}
+Run dir: ${SMOKE_RUN_DIR}
+Base ISO: ${CUSTOM_IMAGE_BASE_ISO}
+Manifest: ${CUSTOM_IMAGE_MANIFEST}
+Output ISO: ${SMOKE_CUSTOM_IMAGE_OUTPUT_ISO}
+Guest RAM: ${SMOKE_RAM_MB} MiB
+Installer disk: ${SMOKE_SYSTEM_DISK_PATH} (${SMOKE_SYSTEM_DISK_GB}G)
+Interactive display: ${SMOKE_QEMU_DISPLAY}
+QEMU: ${SMOKE_QEMU_BIN}
+Firmware code: ${QEMU_FIRMWARE_CODE}
+Firmware vars: ${QEMU_FIRMWARE_VARS}
+Mode: $(if [[ "${SMOKE_DRY_RUN}" == "1" ]]; then printf '%s' dry-run; elif [[ "${SMOKE_INTERACTIVE}" == "1" ]]; then printf '%s' interactive; else printf '%s' headless; fi)
+EOF
+    return 0
+  fi
+
   cat <<EOF
 Smoke target: ubuntu uefi
 Run dir: ${SMOKE_RUN_DIR}
@@ -454,7 +559,19 @@ smoke_main() {
 
   local distro="$1"
   local mode="$2"
+  SMOKE_LANE="${SMOKE_LANE:-backend}"
   SMOKE_REPO_ROOT="$(smoke_repo_root)"
+
+  case "${SMOKE_LANE}" in
+    backend)
+      ;;
+    custom-image)
+      SMOKE_TARGET_NAME="${SMOKE_TARGET_NAME:-ubuntu-custom-image}"
+      ;;
+    *)
+      smoke_die "unsupported smoke lane: ${SMOKE_LANE}"
+      ;;
+  esac
 
   smoke_ensure_supported_target "${distro}" "${mode}"
   smoke_configure_paths "${SMOKE_REPO_ROOT}" "${distro}" "${mode}"
@@ -466,7 +583,11 @@ smoke_main() {
 
   trap 'smoke_cleanup $?' EXIT
 
-  smoke_prepare_boot_root
+  if [[ "${SMOKE_LANE:-backend}" == "backend" ]]; then
+    smoke_prepare_boot_root
+  else
+    smoke_prepare_custom_image_iso
+  fi
   smoke_print_summary
 
   if [[ "${SMOKE_DRY_RUN}" == "1" ]]; then
@@ -474,11 +595,13 @@ smoke_main() {
     return 0
   fi
 
-  smoke_start_backend
-  smoke_wait_for_backend
-  smoke_refresh_backend_assets
-  smoke_sync_boot_root_from_backend
-  smoke_probe_assets
+  if [[ "${SMOKE_LANE:-backend}" == "backend" ]]; then
+    smoke_start_backend
+    smoke_wait_for_backend
+    smoke_refresh_backend_assets
+    smoke_sync_boot_root_from_backend
+    smoke_probe_assets
+  fi
   smoke_start_qemu
   if [[ "${SMOKE_INTERACTIVE}" == "1" ]]; then
     smoke_verify_markers_post_run

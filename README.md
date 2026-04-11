@@ -17,13 +17,16 @@ This project is still in an early stage. Expect breaking changes, missing harden
 - Supported v1 distros: Ubuntu, Fedora, Arch Linux
 - Supported boot modes: BIOS and UEFI
 - Image distribution via cached official upstream assets
+- Ubuntu custom image builds are supported in a bounded v1 build lane: Linux-host-only, root-required, and verified with a backendless Ubuntu UEFI smoke path
+- `boopa` remains the network-boot controller; custom image builds are a separate build lane, not a runtime distribution path
 
 Out of scope in v1:
 
 - DHCP writeback or DHCP server management
 - Auth or access control
-- Custom image builds
 - Post-install automation
+- Non-Ubuntu custom image builds
+- Non-Linux or rootless custom-image build support
 
 ## Runtime assumptions
 
@@ -73,12 +76,32 @@ Frontend:
 - `npm test --prefix frontend`
 - `npm run typecheck --prefix frontend`
 - `npm run build --prefix frontend`
+- `npx --prefix frontend playwright install chromium`
+- `npm run test:e2e --prefix frontend`
 
 Frontend dev proxy:
 
 - The frontend npm package and lockfile both live under `frontend/`.
 - `npm run dev --prefix frontend` proxies `/api` and `/boot` to `http://127.0.0.1:8080`
 - Override the dev backend target with `BOOPA_DEV_BACKEND=http://host:port npm run dev --prefix frontend`
+
+Frontend e2e:
+
+- `frontend/playwright.config.ts` starts a real `boopa` backend plus a Vite dev server for browser tests.
+- The browser lane uses an isolated `BOOPA_DATA_DIR` under the OS temp directory and never reuses the default `var/boopa`.
+- First-wave browser coverage is intentionally narrow:
+  - dashboard initial render against the live backend
+  - Ubuntu autoinstall edit/save
+  - persistence across reload for the saved autoinstall state
+- First-wave browser coverage intentionally excludes distro-switch e2e.
+- First-wave browser coverage does not validate backend-served static assets in-browser; it exercises the Vite dev server plus live backend path.
+
+Typical local frontend e2e verification:
+
+```sh
+npx --prefix frontend playwright install chromium
+npm run test:e2e --prefix frontend
+```
 
 Smoke scripts:
 
@@ -107,6 +130,12 @@ Current scope of the concrete harness:
 - The smoke harness picks random high unprivileged API/TFTP ports by default to avoid local port collisions.
 - When launched from an interactive terminal, the harness attaches QEMU serial I/O to that terminal and enables a QEMU display window by default so VGA/installer output is visible. Set `SMOKE_INTERACTIVE=0` to force headless mode, or override the interactive display backend with `SMOKE_QEMU_DISPLAY` if `default` is not suitable on your host.
 - Success is log-based: ideal markers indicate installer/live progress, fallback markers indicate kernel/initrd handoff and boot continuation.
+
+Canonical custom-image smoke shape:
+
+- set `CUSTOM_IMAGE_BASE_ISO`, `CUSTOM_IMAGE_MANIFEST`, and `CUSTOM_IMAGE_OUTPUT_ISO`
+- run `scripts/smoke/boot-ubuntu-custom-image.sh`
+- the lane builds the ISO if needed, then boots the generated Ubuntu UEFI image without starting `boopa`
 
 Typical local smoke verification:
 
