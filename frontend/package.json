@@ -15,10 +15,10 @@
   "dependencies": {
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.1",
-    "@mui/material": "^7.3.9",
+    "@mui/material": "^9.0.0",
     "@reduxjs/toolkit": "^2.11.2",
-    "react": "^19.2.4",
-    "react-dom": "^19.2.4",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
     "react-redux": "^9.2.0"
   },
   "devDependencies": {
@@ -26,14 +26,14 @@
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
-    "@types/node": "^25.5.2",
+    "@types/node": "^25.6.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
-    "jsdom": "^27.4.0",
-    "postcss": "^8.5.8",
+    "jsdom": "^29.0.2",
+    "postcss": "^8.5.9",
     "typescript": "^6.0.2",
-    "vite": "^8.0.5",
-    "vitest": "^4.1.2"
+    "vite": "^8.0.8",
+    "vitest": "^4.1.4"
   }
 }
